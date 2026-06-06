@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+.next/
+
+# environment
+.env
+.env.local
+.env*.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# build artifacts
+*.tsbuildinfo
+
+# backups
+backups/
+
+# scripts executable on Linux (keep files, skip permission changes)
+# use: chmod +x scripts/*.sh

@@ -1,0 +1,26 @@
+topic,question,difficulty,frequency,tags
+基础概念,What is an AI Agent? 什么是AI Agent？,初级,高频,agent;基础;定义
+基础概念,Agent与传统程序的区别是什么？,初级,高频,agent;对比;基础
+基础概念,LLM在Agent中扮演什么角色？,初级,高频,LLM;角色;基础
+基础概念,Agent的感知-推理-行动循环是什么？,初级,高频,循环;ReAct;基础
+基础概念,Agent的记忆系统有哪些类型？,初级,高频,记忆;向量数据库;基础
+核心模块,Tool Calling（工具调用）的实现原理是什么？,初级,高频,工具调用;Function Calling;核心
+核心模块,RAG（检索增强生成）在Agent中如何应用？,初级,高频,RAG;检索;向量数据库
+核心模块,什么是Prompt Engineering？在Agent中有哪些关键技巧？,初级,高频,Prompt;提示工程;核心
+核心模块,如何实现Agent的规划（Planning）能力？,初级,高频,规划;ReAct;Planning
+核心模块,什么是Agent的上下文窗口管理策略？,初级,高频,上下文;记忆管理;工程
+架构设计,单Agent vs 多Agent架构的选择标准是什么？,中级,高频,架构;多Agent;设计
+架构设计,如何设计Agent的错误处理和容错机制？,中级,高频,错误处理;容错;工程
+架构设计,Agent的状态管理如何设计？,中级,高频,状态管理;LangGraph;架构
+架构设计,如何评估和优化Agent的性能？,中级,高频,评估;性能;优化
+架构设计,Agent的安全性设计有哪些关键考虑？,中级,高频,安全;Prompt Injection;架构
+工作模式,ReAct模式的工作原理和优缺点是什么？,中级,高频,ReAct;工作模式;推理
+工作模式,Plan-and-Execute模式与ReAct有何不同？,中级,高频,Plan-and-Execute;工作模式;规划
+工作模式,什么是Human-in-the-Loop？何时应该使用？,中级,高频,HITL;人工干预;安全
+工作模式,Reflection（反思）机制如何提升Agent能力？,中级,高频,Reflection;反思;自我改进
+工作模式,什么是Agent的工具选择策略？,中级,高频,工具选择;策略;工程
+工程实践,如何构建Agent的可观测性（Observability）系统？,中级,高频,可观测性;监控;工程实践
+工程实践,Agent的测试策略有哪些？,中级,高频,测试;工程实践;质量保证
+工程实践,如何优化Agent的Token消耗和成本？,中级,高频,Token优化;成本;工程实践
+评估与多Agent,多Agent系统的协调机制有哪些？,高级,高频,多Agent;协调;架构
+评估与多Agent,如何系统性地评估Agent的能力边界？,高级,高频,评估;能力边界;多Agent

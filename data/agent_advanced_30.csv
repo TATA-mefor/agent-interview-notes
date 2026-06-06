@@ -1,0 +1,700 @@
+topic,question,answer,difficulty,frequency,tags
+核心模块,RAG 检索增强生成的完整 Pipeline 是什么？每个阶段的技术选型有哪些？,"RAG Pipeline 分为 5 个阶段：
+1. 文档解析：PDF.js / Unstructured / LlamaParse
+2. 文本切分：固定大小 / 语义切分 / 父子切分
+3. 向量化：OpenAI ada-002 / BGE / Jina / Cohere
+4. 存储检索：pgvector / Pinecone / Milvus / Qdrant
+5. 上下文注入：直接拼接 / Map-Reduce / Refine
+
+关键技术选型：
+- Chunk Size: 通常 500-1500 tokens，根据文档类型调整
+- Embedding 模型：中文优先 BGE-large-zh，多语言用 multilingual-e5
+- 检索策略：Top-K + 相似度阈值 + MMR 去重
+- 高级 RAG：HyDE / Self-RAG / Adaptive RAG / GraphRAG",中级,高频,RAG;检索;Pipeline;向量数据库
+核心模块,Function Calling 和 Tool Use 有什么区别？各自的实现原理？,"Function Calling 是 OpenAI 提出的术语，Tool Use 是 Anthropic 提出的术语，本质相同：让 LLM 结构化地调用外部工具。
+
+实现原理：
+1. JSON Schema 定义工具（名称、描述、参数类型、必填字段）
+2. 系统提示中注入工具列表
+3. LLM 输出结构化的工具调用请求（function_call）
+4. 应用层解析请求 → 执行函数 → 返回结果
+5. 将结果注入对话历史 → LLM 继续推理
+
+区别：
+- OpenAI：支持 parallel_tool_calls（同时调用多个工具）
+- Anthropic：支持 tool_use content block，更强调 chain-of-thought
+- 开源实现：Gorilla / ToolLLM / NexusRaven
+
+工程要点：工具描述质量直接影响调用准确性；工具数量 >20 时建议用工具检索而非全部注入。",中级,高频,"Function Calling;Tool Use;工具调用"
+核心模块,Agent 的记忆系统如何设计？短期记忆和长期记忆的区别？,"记忆系统分四层：
+
+1. 感知记忆（Sensory）：当前上下文窗口内的信息，由 LLM 直接处理
+2. 短期记忆（STM）：当前会话的完整对话历史，存储在内存或 Redis
+3. 长期记忆（LTM）：跨会话持久化存储，使用向量数据库 + 关系数据库
+4. 程序记忆（Procedural）：Agent 的技能和行为模式，编码在提示词或微调中
+
+关键设计决策：
+- 记忆检索：语义搜索（embedding similarity）+ 关键词 + 时间衰减
+- 记忆写入：自动提取关键信息 → 生成摘要 → embedding → 存储
+- 记忆更新：增量更新 vs 全量覆盖
+- 记忆整合：Mem0 / Memobase / Letta 等记忆框架
+
+工程挑战：记忆膨胀、检索精度、隐私合规、跨会话一致性",中级,高频,记忆;向量数据库;上下文管理
+工作模式,ReAct 模式的核心原理是什么？和 Chain-of-Thought 有什么区别？,"ReAct（Reasoning + Acting）工作流程：
+Thought → Action → Observation → Thought → Action → ... → Final Answer
+
+每步生成：
+- Thought：推理当前状态，决定下一步
+- Action：调用工具（搜索/计算/代码执行）
+- Observation：接收工具返回结果
+- 循环直到任务完成
+
+与 CoT 的区别：
+- CoT：仅推理，不执行操作。适合数学、逻辑推理
+- ReAct：推理 + 行动交替。适合需要外部信息/工具的任务
+- ReAct 的优势：错误可追溯、结果可验证、能处理不确定性
+- ReAct 的代价：步骤多 → 延迟高、Token 消耗大
+
+实现要点：
+- 设置最大步骤数（10-15）防止无限循环
+- 解析 Thought/Action 格式（正则或 JSON）
+- 错误处理：工具失败 → LLM 感知错误 → 重试或换策略
+
+论文：Yao et al., ReAct: Synergizing Reasoning and Acting in Language Models, ICLR 2023",高级,高频,"ReAct;CoT;推理;工作模式"
+架构设计,多 Agent 系统有哪些协调模式？各自适用场景？,"五种主流协调模式：
+
+1. Supervisor 模式（中央协调）：
+   一个 Supervisor Agent 分配任务、汇总结果
+   适用：任务可分解、子任务类型不同
+
+2. Peer-to-Peer 模式（去中心化）：
+   Agent 之间直接通信，消息广播
+   适用：平等角色协作、需要灵活通信
+
+3. Pipeline 模式（流水线）：
+   Agent 串行处理，输出→输入
+   适用：数据处理流水线、多阶段任务
+
+4. Blackboard 模式（共享黑板）：
+   所有 Agent 读写共享状态空间
+   适用：需要全局状态的复杂问题
+
+5. Market 模式（竞标机制）：
+   Agent 竞标任务，最优者执行
+   适用：资源受限、需要效率优化
+
+框架选型：AutoGen（微软）/ CrewAI / LangGraph / MetaGPT
+
+选择标准：任务复杂度、通信开销、调试难度、可扩展性",高级,高频,"多Agent;协调;架构;Supervisor"
+工作模式,Plan-and-Execute 模式和 ReAct 模式如何选择？,"Plan-and-Execute（P&E）：
+1. Planner 生成完整执行计划（任务步骤列表）
+2. Executor 逐步执行每个子任务
+3. 执行过程中可 Re-plan（重新规划）
+
+对比 ReAct：
+| 维度 | ReAct | P&E |
+|------|-------|-----|
+| 规划时机 | 边做边想 | 先想再做 |
+| 步骤效率 | 多步试错 | 计划引导 |
+| 适应性 | 灵活应对变化 | 计划可能僵化 |
+| Token 消耗 | 每步推理 | 集中规划 |
+| 可审查性 | 推理链 | 显式计划 |
+
+选择指南：
+- 任务确定性高 → P&E
+- 任务需要探索 → ReAct
+- 长任务（>15 步）→ P&E
+- 短任务（<10 步）→ ReAct
+- 可并行子任务 → P&E
+- 工具结果不确定 → ReAct
+
+实现：LangChain PlanAndExecuteAgent / LangGraph 条件边",高级,高频,"Plan-and-Execute;ReAct;规划;工作模式"
+架构设计,如何设计 Agent 的上下文窗口管理策略？,"当对话超过 LLM 上下文限制时的管理策略：
+
+1. 滑动窗口（Sliding Window）：
+   保留最近 N 轮，丢弃早期历史
+   优点：简单；缺点：丢失关键信息
+
+2. 摘要压缩（Summarization）：
+   用 LLM 将历史压缩为摘要
+   优点：信息密度高；缺点：细节丢失
+
+3. 重要性过滤（Importance Filtering）：
+   保留工具结果、用户指令等关键信息
+   基于规则或模型判断重要性
+
+4. 外部记忆检索（Memory Retrieval）：
+   历史存入向量数据库，按需检索
+   优点：可扩展；缺点：检索精度依赖
+
+5. 分层策略（推荐）：
+   - 近期 5 轮：完整保留
+   - 中期 20 轮：摘要压缩
+   - 远期历史：外部记忆检索
+
+Token 管理工具：tiktoken / Anthropic tokenizer
+成本控制：设置每会话 Token 预算上限",高级,中频,"上下文;Token;记忆管理;滑动窗口"
+工程实践,Agent 的可观测性系统如何搭建？需要监控哪些指标？,"三大支柱：
+
+1. 日志（Logs）：
+   - 每步 Thought/Action/Observation
+   - LLM 输入输出（截断存储）
+   - 工具调用参数和结果
+   - 错误堆栈
+
+2. 指标（Metrics）：
+   - Token 消耗（总量/每步/每次任务）
+   - 延迟（P50/P95/P99）
+   - 成功率（任务级/步骤级）
+   - 工具调用频率和成功率
+   - 用户满意度
+
+3. 追踪（Traces）：
+   - 完整执行链路（每个步骤的输入输出）
+   - 可视化决策树
+   - 支持回放和调试
+
+工具选型：
+- LangSmith（LangChain 生态）
+- Langfuse（开源，自托管）
+- Arize Phoenix（开源）
+- 自建：ELK / Grafana + Prometheus
+
+生产必备：告警规则（Token 超限/成功率下降/延迟飙升）",高级,中频,"可观测性;监控;日志;LangSmith"
+工程实践,Agent 的测试策略有哪些？如何评估 Agent 质量？,"分层测试：
+
+1. 单元测试：
+   - 工具函数测试
+   - 提示模板测试
+   - 解析逻辑测试
+
+2. 集成测试：
+   - LLM + 单工具交互
+   - Mock LLM 响应（确定性）
+
+3. 端到端测试：
+   - 完整任务流程
+   - 使用 temperature=0 确保确定性
+
+4. 评估（Evaluation）：
+   - LLM-as-Judge：用 GPT-4 评估输出质量
+   - Golden Dataset：标准问答对 + 相似度评分
+   - 人工评估：定期抽样人工打分
+
+评估维度：
+- 准确性：答案是否正确
+- 完整性：是否覆盖所有要点
+- 效率：步骤数、Token 消耗
+- 鲁棒性：异常输入处理
+- 安全性：Prompt Injection 防护
+
+评估框架：AgentBench / GAIA / WebArena / LangSmith Eval",高级,中频,测试;评估;质量保证;LLM-as-Judge
+工程实践,Prompt Injection 是什么？如何防御？,"Prompt Injection 是攻击者通过精心构造的输入，覆盖或操纵 LLM 系统指令的攻击方式。
+
+攻击类型：
+1. 直接注入：用户输入中包含“忽略之前的指令...”
+2. 间接注入：通过外部文档/网页注入恶意指令
+3. 多模态注入：图片中的文字包含攻击指令
+
+防御策略（纵深防御）：
+
+1. 输入层：
+   - 输入验证：检测和过滤可疑模式
+   - 特殊字符转义
+   - 输入长度限制
+
+2. 架构层：
+   - 指令分离：系统提示和用户输入严格区分
+   - 角色权限：最小权限原则
+   - 沙箱执行：代码/命令在隔离环境运行
+
+3. 输出层：
+   - 输出过滤：检测有害内容
+   - 人工审核：高风险操作前 Human-in-the-Loop
+
+4. 监控层：
+   - 异常检测：监控异常指令模式
+   - 审计日志：记录所有输入输出",高级,高频,安全;Prompt Injection;防御
+核心模块,什么是 MCP（Model Context Protocol）？它的作用和架构是什么？,"MCP（Model Context Protocol）是 Anthropic 提出的开放协议，标准化 AI 模型与外部工具/数据源的连接方式。
+
+核心理念：类似 USB-C 之于外设，MCP 是 LLM 连接外部世界的统一接口。
+
+架构：
+- MCP Host：AI 应用（Claude Desktop、IDE 等）
+- MCP Client：与 Server 通信的客户端
+- MCP Server：暴露工具/资源的服务端
+
+三大能力：
+1. Tools：模型可控的执行函数（API 调用、数据库查询）
+2. Resources：模型可读取的数据（文件、数据库记录）
+3. Prompts：预定义的提示模板
+
+优势：
+- 标准化：一次开发，多模型复用
+- 安全性：Server 隔离，权限可控
+- 生态化：社区共建 Server（Filesystem、GitHub、Slack 等）
+
+与传统 Function Calling 的区别：
+- Function Call：LLM 厂商私有协议
+- MCP：开放标准，跨模型跨平台
+
+当前生态：Claude Desktop 原生支持，LangChain/LlamaIndex 已集成",高级,高频,"MCP;协议;工具;Anthropic"
+核心模块,Function Calling 中 JSON Schema 设计的最佳实践有哪些？,"1. 命名规范：
+   - 函数名：snake_case，动词开头（search_documents）
+   - 参数名：snake_case，语义清晰
+
+2. 描述质量（最关键）：
+   - 函数描述：一句话说明功能 + 使用场景
+   - 参数描述：说明含义、格式、约束
+   - 避免歧义：不要用“查询”代替“按 ID 精确查询”
+
+3. 参数设计：
+   - 必填 vs 可选：明确 required 数组
+   - 默认值：在描述中说明
+   - 枚举约束：用 enum 代替 free text
+   - 嵌套深度：不超过 2 层
+
+4. 工程实践：
+   - 工具数量：单次注入 5-15 个为宜
+   - 超 20 个工具：用工具检索（按语义检索相关工具）
+   - 版本管理：工具 Schema 变更需版本控制
+   - 测试：Mock LLM 输出验证工具调用
+
+5. 错误处理：
+   - 在描述中说明可能的错误
+   - 返回结构化错误信息给 LLM",中级,中频,"JSON Schema;Function Calling;最佳实践"
+核心模块,Agent 的推理时延如何优化？有哪些工程手段？,"优化方向（从快到慢排序）：
+
+1. 模型侧：
+   - 小模型替代：简单任务用 GPT-4o-mini / Claude Haiku
+   - 模型量化：GGUF / GPTQ 量化降低推理时间
+   - 预测输出（Predicted Outputs）：OpenAI 减少重复内容生成时间
+
+2. 提示侧：
+   - 提示压缩：精简系统提示和工具描述
+   - 历史摘要：压缩对话历史
+   - 思维缓存：Prompt Caching（Anthropic）/ 自动缓存（DeepSeek）
+
+3. 架构侧：
+   - 并行工具调用：同时调用独立工具
+   - 结果缓存：相同输入缓存 LLM 输出
+   - 流式输出：边生成边展示
+   - 预加载：预测用户意图提前加载
+
+4. 工程侧：
+   - CDN / Edge 部署
+   - 连接池复用
+   - 请求队列 + 优先级调度
+
+指标：P50 < 500ms, P95 < 3s, P99 < 10s（实时场景）",中级,中频,优化;延迟;Token;工程
+架构设计,Agent 的状态管理如何设计？有状态 vs 无状态 Agent？,"状态管理方案对比：
+
+1. 无状态 Agent：
+   - 每次请求独立，所有上下文由调用方传入
+   - 优点：简单、易扩展、无副作用
+   - 缺点：重复传输上下文
+
+2. 有状态 Agent：
+   - 服务端维护会话状态
+   - 优点：减少重复传输、支持长对话
+   - 缺点：状态同步、故障恢复
+
+存储方案：
+- 内存（Cache）：快速但不持久
+- Redis：持久化 + 过期策略，适合短期状态
+- PostgreSQL：长期状态，适合审计和恢复
+- 向量数据库：语义记忆存储
+
+LangGraph 状态管理：
+- StateGraph：定义状态 Schema + 状态转换
+- Checkpointer：支持状态持久化和断点恢复
+- 支持 Human-in-the-Loop 中断和恢复
+
+设计原则：
+- 状态最小化：只存必要信息
+- 幂等性：重复执行不产生副作用
+- 可恢复性：支持从任意节点恢复",高级,中频,"状态管理;LangGraph;有状态;Redis"
+工作模式,什么是 Reflexion 机制？如何通过反思提升 Agent 能力？,"Reflexion 是让 Agent 通过自我反思改进输出的机制。
+
+核心流程：
+1. Agent 执行任务 → 得到结果
+2. Evaluator 评估结果质量
+3. 基于评估生成语言反馈（Reflexion）
+4. 将反馈存入长期记忆
+5. 下次执行时检索相关反思经验
+
+Reflexion 的类型：
+- Self-Reflection：Agent 自己检查输出质量
+- Critique-and-Revise：生成批评 → 修改输出
+- Reflexion（Shinn et al.）：结构化的 trial-and-error 学习
+
+应用场景：
+- 代码生成：运行测试 → 分析失败原因 → 修复
+- 数学推理：验证答案 → 分析错误步骤 → 修正
+- 写作：自我审阅 → 多轮修改
+
+实现要点：
+- 评估函数：定义清晰的评估标准
+- 反馈格式：结构化，包含问题描述和改进建议
+- 记忆持久化：反思经验跨会话复用",高级,中频,"Reflexion;反思;自我改进;学习"
+评估与多Agent,多 Agent 系统中如何处理 Agent 之间的通信和冲突？,"通信机制：
+1. 消息传递：结构化消息（JSON），包含发送者、接收者、内容类型
+2. 共享内存：所有 Agent 读写同一状态空间
+3. 广播/订阅：发布-订阅模式，解耦 Agent
+
+冲突处理：
+1. 投票机制：多 Agent 产生候选答案 → 投票选择
+2. 仲裁者：Supervisor Agent 做最终决策
+3. 置信度加权：各 Agent 输出带置信度 → 加权融合
+4. 辩论模式：Agent 辩论 → 达成共识或由仲裁者裁决
+
+消息格式建议：
+{
+  from: 'agent_id',
+  to: 'agent_id' | 'broadcast',
+  type: 'result' | 'question' | 'feedback',
+  payload: {},
+  confidence: 0.85,
+  timestamp: ''
+}
+
+框架支持：AutoGen（内置消息路由）/ CrewAI（任务委派）/ LangGraph（图状态传递）",高级,中频,"多Agent;通信;冲突;消息传递"
+架构设计,如何评估 Agent 的能力边界？上线前的 Checklist？,"评估维度（6 维能力矩阵）：
+
+1. 任务完成率：目标达成比例
+2. 步骤效率：完成任务所需平均步骤数
+3. 鲁棒性：异常输入/工具失败的处理能力
+4. 安全性：Prompt Injection 抵抗力
+5. 可解释性：推理链的透明度和可追溯性
+6. 成本效率：Token 消耗 / 任务价值
+
+上线 Checklist：
+□ 完成 100+ 个端到端测试用例
+□ Golden Dataset 准确率 > 85%
+□ P95 延迟 < 可接受阈值
+□ Token 预算告警已配置
+□ 错误处理覆盖所有工具调用失败场景
+□ 无限循环检测（最大步骤数限制）
+□ Human-in-the-Loop 高风险操作
+□ Prompt Injection 防护通过红队测试
+□ 审计日志完整记录
+□ 可观测性仪表盘就绪
+□ 回滚和降级方案就绪
+□ 用户反馈机制就绪",高级,中频,"评估;能力边界;上线;Checklist"
+架构设计,Agent 的 Token 消耗如何优化？有哪些省钱策略？,"优化策略（按收益排序）：
+
+1. Prompt Caching（收益最大）：
+   - Anthropic：缓存系统提示，减少 90% 重复计算
+   - DeepSeek：自动上下文缓存
+   - 策略：系统提示 + 工具定义放前面
+
+2. 模型分级：
+   - 简单任务：GPT-4o-mini / Claude Haiku / DeepSeek-V3
+   - 复杂推理：GPT-4o / Claude Opus
+   - 估算：70% 用便宜模型 → 节省 50% 成本
+
+3. 上下文管理：
+   - 历史摘要：压缩对话历史
+   - 重要信息过滤：只保留工具结果和关键信息
+   - 上下文窗口：短任务用 4K / 8K，按需扩至 128K
+
+4. 结果缓存：
+   - 语义相似问题 → 复用 LLM 回答
+   - 工具结果缓存（数据库查询、API 调用）
+
+5. 批处理：
+   - 合并多个小请求为一次大请求
+   - 并发处理独立任务
+
+成本监控：
+- 按用户/任务/tag 追踪 Token 消耗
+- 设置每日/每用户预算上限",高级,中频,"Token优化;成本;Prompt Caching;省钱"
+评估与多Agent,如何设计一个可靠的 Agent 评估框架？LLM-as-Judge 有哪些局限性？,"评估框架设计：
+
+1. 测试数据集：
+   - Golden Dataset：100-500 个人工标注的问答对
+   - 覆盖：正常/边界/异常/对抗 四类输入
+   - 定期更新：加入线上 Bad Case
+
+2. 自动评估：
+   - 精确匹配：适用于有标准答案的场景
+   - 语义相似度：BERTScore / BLEURT
+   - LLM-as-Judge：GPT-4 打分（准确性、完整性、流畅性）
+
+3. 人工评估：
+   - 定期抽样：每周 50-100 条人工打分
+   - 标注维度：正确性、有用性、安全性
+
+LLM-as-Judge 局限性：
+1. 位置偏差：偏好第一个候选答案
+2. 长度偏差：偏好更长但未必更好的回答
+3. 自我偏好：GPT-4 倾向于给 GPT 系列输出更高分
+4. 幻觉风险：Judge 本身可能误判
+5. 成本：评估本身消耗大量 Token
+
+缓解策略：
+- 交换候选顺序（Position Swap）
+- 多次评分取平均
+- 结合多种评估方法
+- 定期人工验证自动评估结果",高级,中频,"评估框架;LLM-as-Judge;测试;Golden Dataset"
+核心模块,什么是 Agent 的 Tool Retrieval？什么时候需要？,"Tool Retrieval 是当工具数量过多时，先用语义搜索筛选相关工具再注入提示词的技术。
+
+为什么需要：
+- LLM 上下文有限，注入 50+ 个工具描述会挤占推理空间
+- 工具描述消耗 Token（每个工具 50-200 tokens）
+- 无关工具干扰 LLM 决策
+
+实现方式：
+1. 工具语义索引：为每个工具描述生成 embedding
+2. 查询时检索：用户问题 → embedding → 检索 Top-K 工具
+3. 动态注入：只将检索到的工具描述加入提示
+
+开源方案：
+- Gorilla：LLM 工具检索专用模型
+- ToolBench：大规模工具调用基准
+- NexusRaven：开源 Function Calling 模型
+
+选择阈值：
+- 工具数 < 10：全部注入
+- 工具数 10-30：Top-10 工具检索
+- 工具数 > 30：Top-5 + 按类别分组
+
+工程实践：工具检索 + 工具链预定义 + 工具优先级引导",中级,中频,"Tool Retrieval;工具选择;语义索引"
+核心模块,RAG 中 HyDE（假设文档嵌入）的原理和适用场景？,"HyDE（Hypothetical Document Embeddings）原理：
+1. 用户提问 → LLM 生成假设性答案文档
+2. 假设文档进行 embedding
+3. 用假设文档的向量检索真实文档
+
+为什么有效：
+- 用户问题通常很短，embedding 信息量不足
+- 假设答案与真实文档在语义空间更接近
+- 缩小了“问题-文档”之间的语义 Gap
+
+适用场景：
+- 用户查询简短（< 10 词）
+- 查询与文档风格差异大（口语 vs 学术）
+- 需要召回长文档
+
+不适用场景：
+- 查询已经足够详细
+- LLM 幻觉会生成错误假设
+- 对延迟敏感（多一次 LLM 调用）
+
+实现要点：
+- 假设文档不需要事实正确，只需要风格相似
+- Prompt：根据以下问题，写一段答案...
+- 可缓存常见查询的假设文档
+
+成本：多一次 LLM 调用 + 多一次 embedding",高级,中频,"HyDE;RAG;embedding;检索优化"
+工程实践,如何在 Agent 中实现 Human-in-the-Loop（HITL）？,"HITL 是在 Agent 执行的关键节点引入人工确认或干预。
+
+适用场景：
+1. 高风险操作前：发送邮件、删除数据、执行支付
+2. Agent 不确定时：置信度低于阈值 → 请求澄清
+3. 关键决策节点：多 Agent 投票平局 → 人工仲裁
+4. 错误恢复：Agent 无法自行修复 → 人工指导
+
+实现方式：
+1. 同步中断：
+   - LangGraph：interrupt_before / interrupt_after
+   - Agent 暂停 → 等待用户输入 → 继续执行
+
+2. 异步审批：
+   - Agent 生成操作提案 → 推送到审批队列
+   - 人工审查 → 批准/拒绝/修改
+
+3. 可视化监控：
+   - 实时展示 Agent 执行状态
+   - 人工可选介入或旁路
+
+设计原则：
+- 默认自动化，关键节点人工
+- 审批超时：设置默认行为（拒绝/降级）
+- 审批理由：记录人工决策的原因",高级,中频,"HITL;人工干预;LangGraph;审批"
+架构设计,如何处理 Agent 系统中的部分失败（Partial Failure）？,"部分失败场景：
+1. 并行分支中某个工具调用失败
+2. 多 Agent 协作中某个 Agent 崩溃
+3. RAG 检索中某个数据源不可用
+
+处理策略：
+
+1. 重试机制：
+   - 指数退避（1s → 2s → 4s → 8s）
+   - 最大重试次数（通常 3 次）
+   - 幂等设计：重试不产生副作用
+
+2. 降级方案：
+   - 主数据源失败 → 备用数据源
+   - 强模型失败 → 弱模型
+   - 完整功能失败 → 核心功能
+
+3. 部分结果返回：
+   - 5 个并行检索源中 3 个成功 → 返回 3 个结果 + 标记失败源
+   - 不因为 1 个失败阻塞整体
+
+4. 超时处理：
+   - 每个工具调用设置超时
+   - 超时后执行降级逻辑
+
+5. 错误传播策略：
+   - Fail-Fast：任一失败立即终止
+   - Fail-Safe：忽略失败继续执行
+   - Fail-Controlled：失败影响可控范围
+
+工程实践：
+- 依赖图分析：确定哪些失败可忽略、哪些必须处理
+- 回滚机制：关键操作支持撤销",高级,中频,"容错;部分失败;重试;降级"
+核心模块,向量数据库选型对比：Pinecone vs Milvus vs pgvector vs Weaviate？,"对比维度：
+
+1. pgvector（PostgreSQL 扩展）：
+   - 优点：与关系数据无缝集成、部署简单、社区活跃
+   - 缺点：大规模（>10M）性能下降、索引构建慢
+   - 适合：中小规模、需要关系+向量混合查询
+
+2. Pinecone（云托管）：
+   - 优点：零运维、自动扩展、低延迟（<100ms）
+   - 缺点：价格高、数据出境风险、供应商锁定
+   - 适合：快速上线、不想管运维的团队
+
+3. Milvus（开源）：
+   - 优点：高性能（10 亿级向量）、多种索引类型
+   - 缺点：部署复杂、资源消耗大
+   - 适合：大规模生产环境
+
+4. Weaviate（开源）：
+   - 优点：内置向量化模块、GraphQL API、混合搜索
+   - 缺点：社区较小、中文支持弱
+   - 适合：需要开箱即用向量化的场景
+
+选型建议：
+- 个人项目 + POC → pgvector
+- 初创公司 → Pinecone（快）+ pgvector（省）
+- 大型企业 → Milvus
+- 需要 Hybrid Search → Weaviate",中级,中频,"向量数据库;pgvector;Pinecone;Milvus;选型"
+工作模式,如何设计 Agent 的工具选择策略？避免选错工具？,"工具选择策略分层：
+
+1. 被动选择（LLM 直接选）：
+   提示中列出工具描述 → LLM 根据任务选择
+   风险：LLM 可能选错或产生幻觉
+
+2. 工具检索（Tool Retrieval）：
+   语义搜索筛选 Top-K 工具 → 注入提示
+   风险：检索不准 → 遗漏关键工具
+
+3. 工具链预定义（Workflow）：
+   预定义步骤-工具映射（如“搜索场景：必用 search_docs”）
+   风险：灵活性差
+
+4. 工具优先级引导：
+   - 在提示中设置优先级
+   - 示例 Few-shot 引导正确选择
+
+5. 工具验证层（推荐）：
+   - LLM 选择工具 → 验证器检查合理性
+   - 规则检查：参数类型、权限、场景匹配
+   - 异常时降级到默认工具或请求人工
+
+减少选错的技巧：
+- 工具描述清晰（功能 + 参数 + 示例）
+- 相似工具明确区分（search_by_id vs search_by_keyword）
+- 错误反馈：工具调用失败 → LLM 学习 → 下次改进",中级,中频,工具选择;策略;验证;Tool Retrieval
+工程实践,Agent 项目从 PoC 到生产的关键挑战有哪些？,"六大挑战：
+
+1. 可靠性：
+   - PoC：80% 成功率就是成功
+   - 生产：99%+ 成功率才上线
+   - 解决：重试、降级、HITL、充分测试
+
+2. 延迟：
+   - PoC：5 秒响应可接受
+   - 生产：<3 秒（实时场景 <1 秒）
+   - 解决：模型分级、并行调用、流式输出
+
+3. 成本：
+   - PoC：$10/天
+   - 生产：$1000+/天（随用户增长）
+   - 解决：Prompt Caching、小模型、结果缓存
+
+4. 安全性：
+   - PoC：基本防护
+   - 生产：Prompt Injection、数据泄露、滥用
+   - 解决：纵深防御、审计、速率限制
+
+5. 可观测性：
+   - PoC：print/console.log
+   - 生产：Langfuse/LangSmith 全链路追踪
+   - 解决：指标仪表盘、告警、日志分析
+
+6. 迭代速度：
+   - PoC：手动测试
+   - 生产：CI/CD + 自动评估 + 灰度发布",高级,中频,"生产化;可靠性;成本;工程挑战"
+评估与多Agent,Agentic AI 和传统 RPA 有什么区别？各自适合什么场景？,"核心区别：
+
+| 维度 | RPA | Agentic AI |
+|------|-----|------------|
+| 决策方式 | 规则驱动（if-then） | LLM 推理 + 自主决策 |
+| 任务类型 | 重复、结构化 | 复杂、非结构化 |
+| 适应性 | 流程固定 | 动态调整策略 |
+| 错误处理 | 预设异常路径 | 自主判断 + 重试 |
+| 可解释性 | 高（规则透明） | 中（推理链可追溯） |
+| 开发成本 | 低（拖拽配置） | 中高（需要提示工程） |
+
+RPA 适合：
+- 固定流程：发票录入、数据搬运
+- 高精度要求：财务、合规
+- 大批量重复：每天 10000 次
+
+Agentic AI 适合：
+- 动态流程：客服、研究分析
+- 需要理解语义：文档处理、信息提取
+- 多步骤推理：竞品分析、报告生成
+
+融合趋势：RPA 编排层 + Agent 决策层 → Hyperautomation",中级,中频,"Agentic AI;RPA;自动化;对比"
+核心模块,RAG 评估指标有哪些？如何衡量 RAG 系统的质量？,"检索质量指标：
+1. Recall@K：Top-K 结果中包含正确答案的比例
+2. MRR（Mean Reciprocal Rank）：第一个相关结果的位置倒数
+3. NDCG@K：排序质量（考虑位置权重）
+4. Hit Rate：至少命中一个相关文档的比例
+
+生成质量指标：
+1. Faithfulness（忠实度）：回答是否基于检索到的文档
+2. Answer Relevance（相关性）：回答是否回答了问题
+3. Context Relevance：检索到的文档是否与问题相关
+
+端到端指标：
+1. RAGAS 框架（RAG Assessment）：
+   - Faithfulness + Answer Relevance + Context Precision + Context Recall
+2. TruLens：RAG 评估三合一（Answer Relevance、Groundedness、Context Relevance）
+
+人工评估：
+- 盲测对比：RAG vs 无 RAG 的回答质量
+- 幻觉率：回答中包含不存在于检索文档中的事实的比例
+
+工具：RAGAS（Python 库）/ TruLens / LangSmith Eval",中级,中频,"RAG评估;RAGAS;TruLens;指标"
+架构设计,如何设计支持多租户的 Agent 系统？,"多租户隔离方案：
+
+1. 数据隔离：
+   - 数据库级：每租户独立 DB（最强隔离）
+   - Schema 级：每租户独立 Schema（PG 支持）
+   - 行级：tenant_id 列 + RLS（最灵活）
+   - 推荐：行级 + RLS（个人项目）/ DB 级（企业）
+
+2. 记忆隔离：
+   - 每租户独立向量空间（namespace/collection）
+   - 会话 ID 绑定 tenant
+
+3. 配置隔离：
+   - 每租户独立 LLM 配置（Provider/Model/API Key）
+   - app_settings 表 + tenant_id
+
+4. 资源隔离：
+   - Token 配额：每租户每日/每月上限
+   - 并发限制：每租户最大并发请求数
+   - 速率限制：每租户 QPS 上限
+
+5. 安全：
+   - JWT 中包含 tenant_id
+   - API 层校验租户权限
+   - 审计日志记录租户操作
+
+工程框架：Row Level Security（PG）/ Middleware 拦截 / API Gateway",高级,中频,"多租户;隔离;RLS;架构设计"

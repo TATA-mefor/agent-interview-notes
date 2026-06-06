@@ -1,0 +1,31 @@
+{
+  "name": "agent-notes",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@xyflow/react": "^12.11.0",
+    "ag-grid-community": "^32.0.0",
+    "ag-grid-react": "^32.0.0",
+    "autoprefixer": "^10.4.0",
+    "mammoth": "^1.12.0",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
+    "mermaid": "^11.0.0",
+    "next": "14.2.5",
+    "pdf-parse": "^2.4.5",
+    "postcss": "^8.4.0",
+    "react": "^18",
+    "react-dom": "^18",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5"
+  }
+}
