@@ -1,116 +1,195 @@
-# Agent 面试笔记 (Agent Interview Notes)
+# Agent 面试笔记
 
-一个**本地优先**的 Agent 面试知识卡片系统。电脑运行数据、模型和服务，手机提供轻量复习体验。
+一个本地优先的 Agent 工程面试知识卡片系统。它把题库卡片、Markdown 笔记、批量导入、AI 辅助理解、RAG 知识库、关系图谱、思维导图和复习计划放在同一个 Next.js 应用里，适合在电脑上维护内容，在手机上做轻量复习。
 
-系统整合结构化卡片 CRUD、Markdown 笔记、AI 智能理解、RAG 知识检索、知识图谱、思维导图和基于概率权重的复习规划。
+> 定位：这不是通用笔记软件，也不是通用 RAG 平台，而是面向 Agent / LLM 工程面试准备的专用知识库。
 
-> 🔒 **核心定位**：这不是通用笔记软件，也不是通用 RAG 平台。这是面向 Agent 工程面试准备的专用知识卡片系统。
+## 当前能力
 
-## 功能规划
+| 模块 | 说明 |
+| --- | --- |
+| 仪表盘 | 展示题库数量、今日复习、平均掌握度和知识库文档数量 |
+| 题库管理 | 卡片创建、编辑、详情、列表、网格视图、测验/复习卡片视图 |
+| 批量导入 | 支持 CSV、JSON、Markdown、Word、PDF 等导入解析流程，提供 QA 候选预览、证据查看和确认入库 |
+| Markdown 笔记 | 提供 Markdown 编辑入口，面向结构化笔记和面试问答材料整理 |
+| AI 智能理解 | 基于 LLM 生成标准答案、要点、话术、易错点、标签和相关题建议，AI 输出作为建议稿保存 |
+| RAG 知识库 | 支持知识文档上传、切块、embedding、关键词/向量/混合检索 |
+| 关系图谱 | 基于卡片关系展示知识点连接 |
+| 思维导图 | 基于 Mermaid / Markmap 展示主题结构和卡片摘要 |
+| 复习计划 | 基于难度、频率、掌握度、遗忘因子和人工加权计算复习优先级，提供复习中心和甘特图页面 |
+| 本地部署 | Docker Compose 启动 PostgreSQL + pgvector + PostgREST + Next.js，Ollama 可选 |
 
-| 模块         | 说明                                               | 状态   |
-| ------------ | -------------------------------------------------- | ------ |
-| 题库 CRUD    | 卡片管理（创建/编辑/删除/批量操作），AG Grid 表格视图 | 🚧 规划 |
-| 批量导入     | CSV / JSON / Markdown 导入，去重预览               | 🚧 规划 |
-| Markdown 笔记 | 编辑预览，[[双链]]，#标签，导出                    | 🚧 规划 |
-| AI 智能理解  | 生成标准答案/要点/话术/易错点，用户手动采纳         | 🚧 规划 |
-| RAG 知识库   | 文档导入 → 解析 → embedding → 向量检索             | 🚧 规划 |
-| 相关题推荐   | 标签 + 向量 + LLM 混合推荐                          | 🚧 规划 |
-| 思维导图     | Mermaid 按主题可视化                                | 🚧 规划 |
-| 关系图谱     | React Flow 卡片关联可视化                           | 🚧 规划 |
-| 复习计划     | 概率权重公式 + 遗忘曲线 + 甘特图                     | 🚧 规划 |
-| Agent 自动化 | 轻量 Agent Service（理解/推荐/规划/导入/导图）     | 🚧 规划 |
-| 本地部署     | Docker Compose（PostgreSQL + pgvector + ollama）    | 🚧 规划 |
+## 技术栈
 
-## 本地运行
+| 层 | 技术 |
+| --- | --- |
+| 前端 | Next.js 14 App Router、React 18、TypeScript |
+| 样式 | Tailwind CSS |
+| 表格/图形 | AG Grid、React Flow、Mermaid、Markmap |
+| 数据库 | PostgreSQL + pgvector |
+| 本地 Supabase 兼容层 | PostgREST + Nginx proxy |
+| 文档解析 | pdf-parse、pdfjs-dist、mammoth、自定义 Markdown/CSV/JSON importer |
+| LLM | Dify、DeepSeek、OpenAI、智谱 AI、Ollama |
+| 部署 | Docker Compose、Nginx |
+
+## 快速开始
 
 ### 前置条件
 
 - Node.js 18+
-- PostgreSQL（本地或 Docker）
+- npm
+- PostgreSQL 16 + pgvector，或直接使用 Docker Compose
 
-### 快速启动
+### 本地开发
 
 ```bash
-# 1. 安装依赖
 npm install
-
-# 2. 配置环境变量
 cp .env.example .env.local
-# 编辑 .env.local，填入数据库连接信息
-
-# 3. 初始化数据库
-# 在 PostgreSQL 中执行 supabase/schema.sql 和 supabase/seed.sql
-
-# 4. 启动开发服务器
 npm run dev
 ```
 
-访问 **http://localhost:3000**
+访问：
 
-### Docker 一键启动
+```text
+http://localhost:3000
+```
+
+如果只想用本地数据库，可以先启动 PostgreSQL：
 
 ```bash
-docker-compose up -d
+docker compose up -d postgres postgrest supabase-proxy
+```
 
-# 可选：启动 Ollama 本地 LLM
-docker-compose --profile ollama up -d
+首次初始化数据库时，执行：
+
+```bash
+psql "$DATABASE_URL" -f supabase/schema.sql
+psql "$DATABASE_URL" -f supabase/seed.sql
+psql "$DATABASE_URL" -f supabase/init_roles.sql
+```
+
+### Docker Compose
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+可选启动 Ollama：
+
+```bash
+docker compose --profile ollama up -d
+docker compose exec ollama ollama pull qwen2.5:7b
+docker compose exec ollama ollama pull nomic-embed-text
+```
+
+## 环境变量
+
+常用配置见 `.env.example`：
+
+| 变量 | 说明 |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL 连接字符串 |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 或本地 PostgREST proxy 地址 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key；本地兼容模式下也会被客户端读取 |
+| `SUPABASE_SERVICE_ROLE_KEY` | 服务端访问 key |
+| `LLM_PROVIDER` | `dify`、`deepseek`、`openai`、`zhipu`、`ollama` 等 |
+| `DIFY_API_URL` / `DIFY_API_KEY` | Dify 接入配置 |
+| `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` / `ZHIPU_API_KEY` | 直连模型 API key |
+| `OLLAMA_BASE_URL` | Ollama 服务地址 |
+| `OLLAMA_EMBED_MODEL` | 本地 embedding 模型，默认可用 `nomic-embed-text` |
+| `NEXT_PUBLIC_APP_URL` | 应用访问地址，用于 PWA 和局域网访问 |
+
+不要把真实 `.env`、`.env.local`、`.env.production` 提交到 Git。
+
+## 常用命令
+
+```bash
+npm run dev      # 开发模式
+npm run build    # 生产构建
+npm run start    # 启动生产构建
+```
+
+数据库脚本：
+
+```bash
+./scripts/backup-db.sh
+./scripts/restore-db.sh backups/agent_notes_YYYYMMDD_HHMMSS.sql
+```
+
+导入/清洗辅助脚本位于 `scripts/`，包括 PDF 文本提取、OCR、导入 SQL 生成、卡片审计和清洗等。
+
+## 页面入口
+
+| 路径 | 用途 |
+| --- | --- |
+| `/` | 仪表盘 |
+| `/cards` | 题库列表 |
+| `/cards/new` | 新建卡片 |
+| `/import` | 批量导入 |
+| `/notes` | Markdown 笔记 |
+| `/knowledge` | 知识库 |
+| `/search` | 搜索 |
+| `/mindmap` | 思维导图 |
+| `/graph` | 关系图谱 |
+| `/review` | 复习中心 |
+| `/review/gantt` | 复习甘特图 |
+| `/agents` | Agent 面板 |
+| `/settings` | 设置 |
+
+## 目录结构
+
+```text
+agent-notes/
+├── src/
+│   ├── app/                 # Next.js 页面和 API routes
+│   ├── components/          # 页面组件、卡片组件、导入组件、图谱/导图/复习组件
+│   └── lib/
+│       ├── agents/          # Agent 编排
+│       ├── db/              # 数据库连接
+│       ├── extraction/      # QA 抽取、清洗、去重、置信度评分
+│       ├── importers/       # CSV/JSON/Markdown/Word/PDF 导入器
+│       ├── rag/             # chunk、embedding、retriever
+│       ├── repositories/    # 数据访问层
+│       └── services/        # 业务服务层
+├── supabase/                # schema、seed、角色初始化
+├── scripts/                 # 导入、清洗、部署、备份脚本
+├── docs/                    # 架构、部署、产品规划文档
+├── nginx/                   # Nginx / PostgREST proxy 配置
+├── public/                  # PWA manifest 等静态资源
+├── docker-compose.yml
+└── Dockerfile
 ```
 
 ## 手机访问
 
-1. 确保手机与电脑在同一局域网
-2. 查看电脑局域网 IP（`ipconfig` / `ifconfig`）
-3. 手机浏览器访问 `http://<电脑IP>:3000`
-4. **添加到主屏幕**（PWA 安装）获得全屏体验
+1. 确保手机和电脑在同一局域网。
+2. 查看电脑局域网 IP。
+   - Windows: `ipconfig`
+   - macOS / Linux: `ifconfig` 或 `hostname -I`
+3. 手机浏览器访问：
 
-## 技术栈
-
-| 层       | 技术                                     |
-| -------- | ---------------------------------------- |
-| 框架     | Next.js 14 (App Router) + TypeScript     |
-| 样式     | Tailwind CSS                             |
-| 数据库   | PostgreSQL + pgvector                    |
-| 表格     | AG Grid Community                        |
-| 思维导图 | Mermaid.js                               |
-| 关系图谱 | React Flow                               |
-| LLM      | DeepSeek / OpenAI / 智谱 AI / Ollama     |
-| 部署     | Docker Compose                           |
-
-## 开发策略
-
-- **自建主仓库**，不 fork 大型开源项目
-- 参考 note-gen / Reor / RAGFlow / MaxKB 等项目的设计思路
-- 代码独立实现，业务模型自己定义
-- AI 输出永远是建议稿，用户手动采纳
-- 每次只做一个明确模块，保证 build 通过
-- 默认离线可运行（无 API Key 时基础 CRUD 仍可用）
-
-## 目录结构
-
-```
-agent-notes/
-├── src/
-│   ├── app/          # 页面路由（17 个页面占位）
-│   ├── components/   # UI 组件（layout/cards/markdown/...）
-│   └── lib/          # 业务逻辑（types/db/services/agents/llm/rag/...）
-├── supabase/         # 数据库 Schema & Seed（25 道面试题）
-├── docs/             # 产品文档 & 架构文档
-├── docker/           # Docker 配置
-├── public/           # 静态资源（PWA manifest）
-└── docker-compose.yml
+```text
+http://<电脑局域网IP>:3000
 ```
 
-## 参考项目
+4. 在浏览器中添加到主屏幕，即可作为 PWA 使用。
 
-详见 [docs/references/REFERENCE_PROJECTS.md](docs/references/REFERENCE_PROJECTS.md)
+## 部署文档
 
-## 文档
-
-- [产品规划](docs/PRODUCT_PLAN.md)
 - [系统架构](docs/ARCHITECTURE.md)
 - [本地部署指南](docs/LOCAL_DEPLOYMENT.md)
+- [服务器部署指南](docs/SERVER_DEPLOYMENT.md)
+- [产品规划](docs/PRODUCT_PLAN.md)
 - [参考项目](docs/references/REFERENCE_PROJECTS.md)
+
+## 设计原则
+
+- 本地优先，基础 CRUD 不依赖外部 LLM。
+- AI 输出只作为建议稿，用户手动采纳。
+- 页面层不直接写数据库，遵循 API Route → Service → Repository 分层。
+- 优先支持电脑维护内容、手机复习的双端体验。
+- 部署到公网前需要额外增加认证或访问控制。
 
 ## License
 
