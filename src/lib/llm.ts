@@ -3,7 +3,7 @@
  * Priority: DB settings (from /settings/llm page) > Env vars > Auto-detect
  */
 
-export type LlmProvider = 'dify' | 'deepseek' | 'openai' | 'zhipu' | 'ollama'
+export type LlmProvider = 'dify' | 'deepseek' | 'openai' | 'zhipu' | 'ollama' | 'qwen'
 
 interface LlmMessage { role: 'system' | 'user' | 'assistant'; content: string }
 
@@ -50,6 +50,7 @@ async function getProvider(): Promise<LlmProvider> {
   if (getEnv('DEEPSEEK_API_KEY')) return 'deepseek'
   if (getEnv('OPENAI_API_KEY')) return 'openai'
   if (getEnv('ZHIPU_API_KEY')) return 'zhipu'
+  if (getEnv('DASHSCOPE_API_KEY')) return 'qwen'
   throw new Error('未配置 LLM。请在 /settings/llm 填入 API Key，或设置 .env.local')
 }
 
@@ -77,6 +78,7 @@ async function getOC(): Promise<OC> {
     case 'deepseek': return { provider: 'deepseek', apiKey: getEnv('DEEPSEEK_API_KEY')!, baseUrl: 'https://api.deepseek.com/v1/chat/completions', model: 'deepseek-chat' }
     case 'openai': return { provider: 'openai', apiKey: getEnv('OPENAI_API_KEY')!, baseUrl: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' }
     case 'zhipu': return { provider: 'zhipu', apiKey: getEnv('ZHIPU_API_KEY')!, baseUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-4-flash' }
+    case 'qwen': return { provider: 'qwen', apiKey: getEnv('DASHSCOPE_API_KEY')!, baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', model: getEnv('QWEN_CHAT_MODEL') || 'qwen-plus' }
     case 'ollama': return { provider: 'ollama', apiKey: 'ollama', baseUrl: (getEnv('OLLAMA_BASE_URL') || 'http://localhost:11434') + '/v1/chat/completions', model: getEnv('OLLAMA_MODEL') || 'qwen2.5:7b' }
     case 'dify': { const u = getEnv('DIFY_API_URL') || 'http://localhost:5001'; return { provider: 'dify', apiKey: getEnv('DIFY_API_KEY')!, baseUrl: `${u}/v1/chat/completions`, model: 'dify' } }
     default: throw new Error(`未知 provider: ${p}`)
@@ -109,3 +111,98 @@ export async function callLLMStructured<T = Record<string, unknown>>(prompt: str
 }
 
 export async function isLlmConfigured(): Promise<boolean> { try { await getProvider(); return true } catch { return false } }
+
+// ---- Streaming (SSE) ----
+export async function callLLMStream(
+  prompt: string,
+  systemPrompt?: string,
+  opts: LlmCallOptions = {}
+): Promise<ReadableStream<Uint8Array>> {
+  const c = await getOC() // OpenAI-compatible providers only for streaming
+  const msgs: LlmMessage[] = []
+  if (systemPrompt) msgs.push({ role: 'system', content: systemPrompt })
+  msgs.push({ role: 'user', content: prompt })
+
+  const body: Record<string, unknown> = {
+    model: c.model,
+    messages: msgs,
+    temperature: opts.temperature ?? 0.7,
+    stream: true,
+  }
+  if (opts.maxTokens) body.max_tokens = opts.maxTokens
+
+  const r = await fetch(c.baseUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${c.apiKey}`,
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!r.ok) {
+    const t = await r.text()
+    throw new Error(`LLM Stream API ${r.status}: ${t.slice(0, 200)}`)
+  }
+
+  if (!r.body) throw new Error('No response body for streaming')
+
+  // Transform OpenAI SSE into a clean text stream (SSE format for frontend)
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+
+  return new ReadableStream({
+    async start(controller) {
+      const reader = r.body!.getReader()
+      let buffer = ''
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6).trim()
+              if (data === '[DONE]') {
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+                continue
+              }
+              try {
+                const parsed = JSON.parse(data)
+                const delta = parsed.choices?.[0]?.delta?.content
+                if (delta) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: delta })}\n\n`))
+                }
+              } catch {
+                // Skip unparseable chunks
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock()
+        controller.close()
+      }
+    },
+  })
+}
+
+/** Rewrite a user query into a search-optimized form */
+export async function rewriteQueryForSearch(query: string): Promise<string> {
+  if (query.length < 3) return query
+
+  const systemPrompt = 'You are a search query optimizer. Rewrite the user question into concise, keyword-rich search terms. Output ONLY the rewritten query.'
+  const prompt = `Rewrite this question for hybrid (vector + BM25) retrieval in a technical knowledge base:\n\n${query}`
+
+  try {
+    const rewritten = await callLLM(prompt, systemPrompt, { temperature: 0.1, maxTokens: 200 })
+    return rewritten?.trim() || query
+  } catch {
+    return query
+  }
+}

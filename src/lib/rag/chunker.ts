@@ -1,214 +1,353 @@
 /**
- * Document chunking strategies for RAG.
+ * Structured Markdown chunker.
  *
- * Supports:
- *   - Fixed-size chunking (with overlap)
- *   - Paragraph-based chunking
- *   - Markdown-aware chunking (split on headings)
+ * Strategy:
+ *   1. Parse document into heading tree (H1/H2/H3)
+ *   2. Split each section by paragraph
+ *   3. Oversized paragraphs → sentence-split
+ *   4. Undersized chunks → merge with next sibling
+ *   5. Attach heading breadcrumb + position metadata
+ *
+ * References: Chonkie, LangChain Text Splitters, RAGFlow
  */
 
 export interface ChunkResult {
   index: number
   content: string
-  tokenCount: number // estimated
+  tokenCount: number
   metadata: {
-    heading?: string
+    breadcrumb: string    // e.g. "核心模块 > Planning"
+    heading?: string      // closest heading
+    headingLevel?: number // 1-3
     startLine: number
     endLine: number
   }
 }
 
 export interface ChunkOptions {
-  strategy: 'fixed' | 'paragraph' | 'markdown'
-  chunkSize?: number   // target chars per chunk (default: 1000)
-  chunkOverlap?: number // overlap chars (default: 200)
+  strategy: 'markdown' | 'paragraph' | 'fixed'
+  targetSize?: number     // target chars (default 1000)
+  minSize?: number        // merge chunks smaller than this (default 200)
+  maxSize?: number        // split chunks larger than this (default 2000)
+  chunkOverlap?: number   // for fixed strategy only
 }
+
+const DEFAULT_TARGET = 1000
+const DEFAULT_MIN = 200
+const DEFAULT_MAX = 2000
 
 export function chunkText(
   text: string,
-  options: ChunkOptions = { strategy: 'paragraph' }
+  options: ChunkOptions = { strategy: 'markdown' }
 ): ChunkResult[] {
   switch (options.strategy) {
     case 'fixed':
-      return fixedChunk(text, options.chunkSize || 1000, options.chunkOverlap || 200)
-    case 'markdown':
-      return markdownChunk(text)
+      return fixedChunk(text, options.targetSize || 1000, options.chunkOverlap || 200)
     case 'paragraph':
+      return paragraphChunk(text, options.targetSize || DEFAULT_TARGET, options.minSize || DEFAULT_MIN)
+    case 'markdown':
     default:
-      return paragraphChunk(text, options.chunkSize || 1000)
+      return markdownStructuredChunk(text, options)
   }
 }
 
-// ---- Fixed-size chunking ----
-function fixedChunk(text: string, size: number, overlap: number): ChunkResult[] {
-  const chunks: ChunkResult[] = []
-  let index = 0
-  let start = 0
+// ============================================================
+// Structured Markdown Chunking (Main)
+// ============================================================
 
-  while (start < text.length) {
-    let end = Math.min(start + size, text.length)
+interface Section {
+  heading: string
+  level: number          // 1=#, 2=##, 3=###
+  breadcrumb: string     // full path
+  content: string
+  startLine: number
+  endLine: number
+}
 
-    // Try to break at a natural boundary (newline or period)
-    if (end < text.length) {
-      const searchStart = Math.max(start, end - 100)
-      const searchText = text.slice(searchStart, end + 100)
-      const breakPoint = findBreakPoint(searchText, end - searchStart)
-      if (breakPoint > 0) {
-        end = searchStart + breakPoint
-      }
+function markdownStructuredChunk(text: string, options: ChunkOptions): ChunkResult[] {
+  const target = options.targetSize || DEFAULT_TARGET
+  const min = options.minSize || DEFAULT_MIN
+  const max = options.maxSize || DEFAULT_MAX
+
+  // 1. Parse into sections
+  const sections = parseMarkdownSections(text)
+
+  // 2. Split each section into paragraphs, then into chunk-sized pieces
+  let raw: ChunkResult[] = []
+  let idx = 0
+  for (const sec of sections) {
+    const chunks = sectionToChunks(sec, idx, target, max)
+    raw.push(...chunks)
+    idx += chunks.length
+  }
+
+  // 3. Merge undersized chunks
+  raw = mergeSmallChunks(raw, min, target)
+
+  // 4. Re-index
+  return raw.map((c, i) => ({ ...c, index: i }))
+}
+
+// ---- Parse heading tree ----
+
+function parseMarkdownSections(text: string): Section[] {
+  const lines = text.split(/\r?\n/)
+  const sections: Section[] = []
+
+  // Breadcrumb stack: [{level, title}]
+  let breadcrumbs: { level: number; title: string }[] = [{ level: 0, title: '' }]
+  let currentHeading = ''
+  let currentLevel = 0
+  let currentLines: string[] = []
+  let sectionStart = 0
+
+  function flushSection(endLine: number) {
+    const content = currentLines.join('\n').trim()
+    if (!content) {
+      sectionStart = endLine + 1
+      currentLines = []
+      return
     }
 
-    chunks.push({
-      index,
-      content: text.slice(start, end).trim(),
-      tokenCount: estimateTokens(text.slice(start, end)),
-      metadata: {
-        startLine: countNewlines(text, 0, start),
-        endLine: countNewlines(text, 0, end),
-      },
+    const breadcrumb = breadcrumbs
+      .filter(b => b.level > 0)
+      .map(b => b.title)
+      .join(' > ')
+
+    sections.push({
+      heading: currentHeading,
+      level: currentLevel,
+      breadcrumb,
+      content,
+      startLine: sectionStart,
+      endLine,
     })
 
-    index++
-    start = end - overlap
-    if (start >= text.length) break
-    // Prevent infinite loop for very small chunks
-    if (start <= 0) start = end
+    sectionStart = endLine + 1
+    currentLines = []
   }
 
-  return chunks
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const headingMatch = line.match(/^(#{1,4})\s+(.+)/)
+
+    if (headingMatch) {
+      // Flush previous section
+      flushSection(i - 1)
+
+      const level = headingMatch[1].length
+      const title = headingMatch[2].trim()
+      currentHeading = title
+      currentLevel = level
+
+      // Update breadcrumb: pop everything at or below this level
+      while (breadcrumbs.length > 0 && breadcrumbs[breadcrumbs.length - 1].level >= level) {
+        breadcrumbs.pop()
+      }
+      breadcrumbs.push({ level, title })
+
+      // The heading line itself becomes part of the next section's content
+      currentLines = [line]
+      sectionStart = i
+    } else {
+      currentLines.push(line)
+    }
+  }
+
+  // Flush last section
+  flushSection(lines.length - 1)
+
+  return sections
 }
 
-// ---- Paragraph chunking ----
-function paragraphChunk(text: string, maxSize: number): ChunkResult[] {
-  const paragraphs = text.split(/\n\s*\n/)
-  const chunks: ChunkResult[] = []
-  let index = 0
-  let currentChunk = ''
-  let lineOffset = 0
+// ---- Section → Chunks ----
+
+function sectionToChunks(
+  sec: Section,
+  startIdx: number,
+  target: number,
+  max: number
+): ChunkResult[] {
+  const result: ChunkResult[] = []
+
+  // Split into paragraphs first
+  const paragraphs = sec.content.split(/\n\s*\n/)
+  let buffer = ''
+  let bufStart = sec.startLine
 
   for (const para of paragraphs) {
     const trimmed = para.trim()
-    if (!trimmed) {
-      lineOffset += para.split('\n').length
-      continue
-    }
-
-    if (
-      currentChunk &&
-      currentChunk.length + trimmed.length > maxSize
-    ) {
-      chunks.push({
-        index,
-        content: currentChunk.trim(),
-        tokenCount: estimateTokens(currentChunk),
-        metadata: { startLine: 0, endLine: 0 },
-      })
-      index++
-      currentChunk = trimmed
-    } else {
-      currentChunk = currentChunk
-        ? `${currentChunk}\n\n${trimmed}`
-        : trimmed
-    }
-
-    lineOffset += para.split('\n').length
-  }
-
-  // Don't forget the last chunk
-  if (currentChunk.trim()) {
-    chunks.push({
-      index,
-      content: currentChunk.trim(),
-      tokenCount: estimateTokens(currentChunk),
-      metadata: { startLine: 0, endLine: 0 },
-    })
-  }
-
-  return chunks
-}
-
-// ---- Markdown-aware chunking ----
-function markdownChunk(text: string): ChunkResult[] {
-  const chunks: ChunkResult[] = []
-  // Split on ## or ### headings
-  const sections = text.split(/\n(?=##\s)/)
-  let index = 0
-
-  for (const section of sections) {
-    const trimmed = section.trim()
     if (!trimmed) continue
 
-    // Extract heading
-    const headingMatch = trimmed.match(/^(#{2,3})\s+(.+)/)
-    const heading = headingMatch ? headingMatch[2].trim() : undefined
-
-    // If section is too large, sub-chunk by paragraphs
-    if (trimmed.length > 2000) {
-      const paras = trimmed.split(/\n\s*\n/)
-      let subChunk = ''
-      let subIndex = 0
-
-      for (const para of paras) {
-        if (subChunk && subChunk.length + para.length > 1500) {
-          chunks.push({
-            index,
-            content: subChunk.trim(),
-            tokenCount: estimateTokens(subChunk),
-            metadata: { heading, startLine: 0, endLine: 0 },
-          })
-          index++
-          subChunk = para
-          subIndex++
-        } else {
-          subChunk = subChunk ? `${subChunk}\n\n${para}` : para
-        }
-      }
-
-      if (subChunk.trim()) {
-        chunks.push({
-          index,
-          content: subChunk.trim(),
-          tokenCount: estimateTokens(subChunk),
-          metadata: { heading, startLine: 0, endLine: 0 },
-        })
-        index++
-      }
+    // If adding this paragraph would exceed target, flush buffer
+    if (buffer && buffer.length + trimmed.length > target) {
+      result.push(makeChunk(buffer, startIdx + result.length, sec, bufStart, bufStart + buffer.split('\n').length))
+      buffer = trimmed
+      bufStart = sec.startLine + paragraphs.indexOf(para)
     } else {
-      chunks.push({
-        index,
-        content: trimmed,
-        tokenCount: estimateTokens(trimmed),
-        metadata: { heading, startLine: 0, endLine: 0 },
-      })
-      index++
+      buffer = buffer ? `${buffer}\n\n${trimmed}` : trimmed
     }
   }
 
-  return chunks
+  // Flush remaining buffer
+  if (buffer.trim()) {
+    let chunk = makeChunk(buffer, startIdx + result.length, sec, bufStart, sec.endLine)
+    result.push(chunk)
+  }
+
+  // Split oversized chunks
+  const final: ChunkResult[] = []
+  for (const c of result) {
+    if (c.content.length > max) {
+      final.push(...splitOversized(c, target))
+    } else {
+      final.push(c)
+    }
+  }
+
+  return final
+}
+
+// ---- Split oversized chunks by sentence ----
+
+function splitOversized(chunk: ChunkResult, target: number): ChunkResult[] {
+  const parts: ChunkResult[] = []
+  const sentences = chunk.content.split(/(?<=[。！？\n])\s*/)
+  let buffer = ''
+
+  for (const sent of sentences) {
+    if (buffer && buffer.length + sent.length > target) {
+      parts.push({ ...chunk, content: buffer.trim(), tokenCount: estimateTokens(buffer) })
+      buffer = sent
+    } else {
+      buffer = buffer ? buffer + sent : sent
+    }
+  }
+
+  if (buffer.trim()) {
+    parts.push({ ...chunk, content: buffer.trim(), tokenCount: estimateTokens(buffer) })
+  }
+
+  // Re-index
+  return parts.map((c, i) => ({ ...c, index: chunk.index + i }))
+}
+
+// ---- Merge small chunks ----
+
+function mergeSmallChunks(chunks: ChunkResult[], min: number, target: number): ChunkResult[] {
+  if (chunks.length <= 1) return chunks
+
+  const result: ChunkResult[] = []
+  let buffer = chunks[0]
+
+  for (let i = 1; i < chunks.length; i++) {
+    const curr = chunks[i]
+
+    // Merge if buffer is small and adding current won't exceed target
+    if (buffer.content.length < min && buffer.content.length + curr.content.length <= target) {
+      const merged = `${buffer.content}\n\n${curr.content}`
+      buffer = {
+        ...buffer,
+        content: merged,
+        tokenCount: estimateTokens(merged),
+        metadata: {
+          ...buffer.metadata,
+          heading: buffer.metadata.heading || curr.metadata.heading,
+          headingLevel: buffer.metadata.headingLevel || curr.metadata.headingLevel,
+        },
+      }
+    } else {
+      result.push(buffer)
+      buffer = curr
+    }
+  }
+
+  result.push(buffer)
+  return result
 }
 
 // ---- Helpers ----
 
+function makeChunk(content: string, index: number, sec: Section, startLine: number, endLine: number): ChunkResult {
+  return {
+    index,
+    content: content.trim(),
+    tokenCount: estimateTokens(content),
+    metadata: {
+      breadcrumb: sec.breadcrumb,
+      heading: sec.heading,
+      headingLevel: sec.level,
+      startLine,
+      endLine,
+    },
+  }
+}
+
 function estimateTokens(text: string): number {
-  // Rough estimate: ~4 chars per token for Chinese, ~4 for English
-  // Better: count Chinese chars as 1 token, English words as ~1.3 tokens
   const chineseChars = (text.match(/[一-鿿]/g) || []).length
-  const englishWords = (text.match(/[a-zA-Z]+/g) || []).length
-  return Math.ceil(chineseChars * 0.5 + englishWords * 1.3)
+  const words = (text.match(/[a-zA-Z]+/g) || []).length
+  return Math.ceil(chineseChars * 0.5 + words * 1.3)
+}
+
+// ============================================================
+// Fixed-size chunking (fallback)
+// ============================================================
+
+function fixedChunk(text: string, size: number, overlap: number): ChunkResult[] {
+  const chunks: ChunkResult[] = []
+  let index = 0, start = 0
+  while (start < text.length) {
+    let end = Math.min(start + size, text.length)
+    if (end < text.length) {
+      const searchStart = Math.max(start, end - 100)
+      const breakPoint = findBreakPoint(text.slice(searchStart, end + 100), end - searchStart)
+      if (breakPoint > 0) end = searchStart + breakPoint
+    }
+    chunks.push({
+      index,
+      content: text.slice(start, end).trim(),
+      tokenCount: estimateTokens(text.slice(start, end)),
+      metadata: { breadcrumb: '', startLine: countLines(text, 0, start), endLine: countLines(text, 0, end) },
+    })
+    index++
+    start = end - overlap
+    if (start <= 0 || start >= text.length) break
+    start = Math.max(start, end)
+  }
+  return chunks
 }
 
 function findBreakPoint(text: string, target: number): number {
-  // Find the nearest newline or period near the target
-  const nearTarget = text.slice(Math.max(0, target - 50), target + 50)
-  const newlineIdx = nearTarget.lastIndexOf('\n')
-  const periodIdx = nearTarget.lastIndexOf('。')
-  const dotIdx = nearTarget.lastIndexOf('. ')
-
-  const best = Math.max(newlineIdx, periodIdx, dotIdx)
-  return best > 0 ? target - 50 + best + 1 : -1
+  const near = text.slice(Math.max(0, target - 50), target + 50)
+  const idx = Math.max(near.lastIndexOf('\n'), near.lastIndexOf('。'), near.lastIndexOf('. '))
+  return idx > 0 ? target - 50 + idx + 1 : -1
 }
 
-function countNewlines(text: string, start: number, end: number): number {
-  const slice = text.slice(start, end)
-  return (slice.match(/\n/g) || []).length
+function countLines(text: string, start: number, end: number): number {
+  return (text.slice(start, end).match(/\n/g) || []).length
+}
+
+// ============================================================
+// Paragraph chunking (fallback)
+// ============================================================
+
+function paragraphChunk(text: string, target: number, min: number): ChunkResult[] {
+  const paras = text.split(/\n\s*\n/).filter(p => p.trim())
+  const chunks: ChunkResult[] = []
+  let buffer = '', idx = 0
+
+  for (const p of paras) {
+    if (buffer && buffer.length + p.length > target) {
+      chunks.push({ index: idx++, content: buffer.trim(), tokenCount: estimateTokens(buffer), metadata: { breadcrumb: '', startLine: 0, endLine: 0 } })
+      buffer = p
+    } else {
+      buffer = buffer ? `${buffer}\n\n${p}` : p
+    }
+  }
+  if (buffer.trim()) {
+    chunks.push({ index: idx, content: buffer.trim(), tokenCount: estimateTokens(buffer), metadata: { breadcrumb: '', startLine: 0, endLine: 0 } })
+  }
+
+  // Merge small
+  return mergeSmallChunks(chunks, min, target)
 }

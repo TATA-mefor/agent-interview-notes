@@ -25,12 +25,38 @@ function treeToMarkdown(tree: MindMapTree): string {
 }
 
 export default function MarkmapMindMap({ tree }: { tree: MindMapTree | null }) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const markmapRef = useRef<Markmap | null>(null)
+  const [dims, setDims] = useState({ width: 800, height: 600 })
   const [error, setError] = useState<string | null>(null)
 
+  // Measure container and set explicit SVG dimensions (d3-zoom requires pixel values)
   useEffect(() => {
-    if (!tree) return
+    const container = containerRef.current
+    if (!container) return
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        if (width > 0 && height > 0) {
+          setDims({ width, height: Math.max(height, 500) })
+        }
+      }
+    })
+
+    resizeObserver.observe(container)
+    // Initial measurement
+    const { width, height } = container.getBoundingClientRect()
+    if (width > 0 && height > 0) {
+      setDims({ width, height: Math.max(height, 500) })
+    }
+
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!tree || dims.width <= 0) return
     setError(null)
 
     try {
@@ -55,16 +81,21 @@ export default function MarkmapMindMap({ tree }: { tree: MindMapTree | null }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Markmap 渲染失败')
     }
-  }, [tree])
+  }, [tree, dims])
 
   if (!tree) return null
 
   return (
-    <div>
+    <div ref={containerRef} className="w-full" style={{ minHeight: 500 }}>
       {error ? (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">{error}</div>
       ) : (
-        <svg ref={svgRef} className="w-full rounded-lg" style={{ minHeight: 500 }} />
+        <svg
+          ref={svgRef}
+          width={dims.width}
+          height={dims.height}
+          className="rounded-lg"
+        />
       )}
     </div>
   )

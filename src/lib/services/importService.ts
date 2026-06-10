@@ -10,6 +10,7 @@ import * as cardRepo from '@/lib/repositories/cardRepository'
 import * as importRepo from '@/lib/repositories/importRepository'
 import * as cardService from '@/lib/services/cardService'
 import { parseImportContent } from '@/lib/importers'
+import { findSimilarCards, combinedSimilarity } from '@/lib/extraction/qaDedupService'
 import type { ParseResult, ImportFormat } from '@/lib/importers'
 
 // ---- Parse Phase ----
@@ -23,7 +24,9 @@ export interface PreviewRow {
   frequency: string
   tags: string[]
   isDuplicate: boolean
-  duplicateOf?: string // card ID if duplicate
+  duplicateOf?: string          // card ID if exact duplicate (hash match)
+  duplicateSimilarity?: number  // similarity score (0-1) for fuzzy match
+  duplicateQuestion?: string    // the existing similar question
 }
 
 export interface ImportPreview {
@@ -34,6 +37,9 @@ export interface ImportPreview {
   newCount: number
   rows: PreviewRow[]
   parseErrors: string[]
+  suggestKnowledge?: boolean
+  rawText?: string
+  textLength?: number
 }
 
 export async function parseAndPreview(
@@ -51,10 +57,46 @@ export async function parseAndPreview(
   // 2. Parse content
   const parseResult: ParseResult = parseImportContent(content, fileName)
 
-  // 3. Dedup check: compare against existing cards by question text
+  // 3. Dedup check: exact hash match + 80% similarity match
   const existingCards = await getAllExistingQuestions()
   const rows: PreviewRow[] = parseResult.rows.map((row, idx) => {
-    const dup = findDuplicate(row, existingCards)
+    // Check exact hash match first
+    const exactDup = findDuplicate(row, existingCards)
+    if (exactDup) {
+      return {
+        index: idx,
+        topic: row.topic || '',
+        question: row.question || '',
+        answer: row.answer || '',
+        difficulty: row.difficulty || '中级',
+        frequency: row.frequency || '中频',
+        tags: row.tags || [],
+        isDuplicate: true,
+        duplicateOf: exactDup.id,
+        duplicateSimilarity: 1.0,
+        duplicateQuestion: exactDup.question,
+      }
+    }
+
+    // Check 80% similarity fuzzy match
+    const similarMatches = findSimilarCards(row.question || '', existingCards, 0.80)
+    if (similarMatches.length > 0) {
+      const best = similarMatches[0]
+      return {
+        index: idx,
+        topic: row.topic || '',
+        question: row.question || '',
+        answer: row.answer || '',
+        difficulty: row.difficulty || '中级',
+        frequency: row.frequency || '中频',
+        tags: row.tags || [],
+        isDuplicate: true,
+        duplicateOf: best.cardId,
+        duplicateSimilarity: best.similarity,
+        duplicateQuestion: best.existingQuestion,
+      }
+    }
+
     return {
       index: idx,
       topic: row.topic || '',
@@ -63,8 +105,7 @@ export async function parseAndPreview(
       difficulty: row.difficulty || '中级',
       frequency: row.frequency || '中频',
       tags: row.tags || [],
-      isDuplicate: !!dup,
-      duplicateOf: dup?.id,
+      isDuplicate: false,
     }
   })
 

@@ -214,6 +214,16 @@ export interface LlmSuggestion {
   created_at: string
 }
 
+/** Source reference from RAG retrieval */
+export interface SourceReference {
+  chunkId: string
+  documentId: string
+  documentTitle: string
+  breadcrumb: string
+  score: number
+  source: 'vector' | 'keyword' | 'hybrid'
+}
+
 /** AI Understanding output — never auto-apply to user notes */
 export interface AIUnderstandingOutput {
   standard_answer: string
@@ -225,6 +235,8 @@ export interface AIUnderstandingOutput {
   suggested_difficulty: Difficulty
   suggested_frequency: Frequency
   related_question_ids: string[]
+  /** RAG sources used to generate this answer */
+  sources?: SourceReference[]
 }
 
 // ---- AgentRun (Agent 运行记录) ----

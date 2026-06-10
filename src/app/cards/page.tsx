@@ -15,7 +15,11 @@ export default function CardsPage() {
           <p className="text-gray-500 mt-1">管理和浏览 Agent 面试题目卡片</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center bg-gray-100 rounded-lg p-0.5 mr-2">
+          <a href="/import"
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors">
+            📥 批量导入
+          </a>
+          <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
             <button onClick={() => setMode('grid')}
               className={`px-3 py-1.5 rounded-md text-xs transition-colors ${mode === 'grid' ? 'bg-white shadow-sm font-medium text-gray-800' : 'text-gray-500'}`}>
               卡片

@@ -7,7 +7,7 @@
 
 import { callLLMStructured } from '@/lib/llm'
 import { retrieveCardContext } from '@/lib/rag/retriever'
-import type { AIUnderstandingOutput, Card } from '@/lib/types'
+import type { AIUnderstandingOutput, Card, SourceReference } from '@/lib/types'
 
 const SYSTEM_PROMPT = `You are an expert Agent Engineering interview coach.
 You help analyze interview questions about AI Agents and generate structured study materials.
@@ -46,11 +46,12 @@ function buildPrompt(
 现有难度: ${card.difficulty}`
 
   if (ragContext) {
-    prompt += `\n\n📚 以下是从你的知识库中检索到的相关参考资料，请优先参考这些资料来生成答案：\n\n${ragContext}`
+    prompt += `\n\n📚 以下是从你的知识库中检索到的相关参考资料，请优先参考这些资料来生成答案。在每个参考来源标记 [来源: xxx] 后附有具体内容：\n\n${ragContext}`
   }
 
   prompt += `\n\n请生成标准面试答案、关键要点、扩展笔记、面试话术、常见误区、建议标签、建议难度和建议频率。
 如果现有答案已经很完整，可以在其基础上优化。如果现有答案为空，请从零生成。
+如果使用了参考资料，请在 standard_answer 和 extended_notes 中自然引用来源（如"根据《XXX》文档..."）。
 所有输出必须是 JSON 格式。`
 
   return prompt
@@ -65,11 +66,14 @@ export interface UnderstandingResult {
 
 export async function runCardUnderstanding(
   card: Pick<Card, 'topic' | 'question' | 'answer' | 'tags' | 'difficulty'>
-): Promise<UnderstandingResult & { ragContext: string | null }> {
+): Promise<UnderstandingResult & { ragContext: string | null; sources: SourceReference[] }> {
   // Step 1: Search knowledge base for relevant context
   let ragContext: string | null = null
+  let sources: SourceReference[] = []
   try {
-    ragContext = await retrieveCardContext(card.question, 3)
+    const result = await retrieveCardContext(card.question, 3)
+    ragContext = result.text || null
+    sources = result.sources
   } catch { /* RAG unavailable, proceed without */ }
 
   // Step 2: Build prompt with RAG context
@@ -99,10 +103,12 @@ export async function runCardUnderstanding(
       related_question_ids: Array.isArray(output.related_question_ids)
         ? output.related_question_ids
         : [],
+      sources,
     },
     tokensUsed: 0,
     model: '',
     provider: '',
     ragContext,
+    sources,
   }
 }

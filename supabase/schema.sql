@@ -148,9 +148,24 @@ CREATE TABLE IF NOT EXISTS knowledge_chunks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(document_id);
--- IVFFlat index for vector similarity search (build after data load)
--- CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_embedding
---   ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- HNSW index for vector similarity search (better QPS/latency than IVFFlat for medium-scale data)
+-- Requires pgvector 0.5.0+. Falls back to sequential scan if not supported.
+-- CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_embedding_hnsw
+--   ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)
+--   WITH (m = 16, ef_construction = 200);
+
+-- IVFFlat fallback (for pgvector < 0.5.0 or explicit choice)
+-- Uncomment one based on your pgvector version:
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_embedding
+  ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+-- Full-text search column for BM25-style keyword retrieval
+ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS fts tsvector
+  GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED;
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_fts
+  ON knowledge_chunks USING GIN(fts);
 
 -- ============================================================
 -- 8. llm_suggestions — AI 建议记录（不可自动覆盖用户数据）
@@ -296,3 +311,118 @@ CREATE TRIGGER set_question_hash_trigger
   BEFORE INSERT OR UPDATE OF question ON cards
   FOR EACH ROW
   EXECUTE FUNCTION set_question_hash();
+
+-- ============================================================
+-- RPC: search_chunks — Vector-only ANN search
+-- ============================================================
+CREATE OR REPLACE FUNCTION search_chunks(
+  query_embedding vector(1536),
+  match_threshold float DEFAULT 0.3,
+  match_count int DEFAULT 10
+)
+RETURNS TABLE(
+  id uuid,
+  document_id uuid,
+  document_title text,
+  content text,
+  similarity float,
+  metadata jsonb
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    kc.id,
+    kc.document_id,
+    kd.title AS document_title,
+    kc.content,
+    (1 - (kc.embedding <=> query_embedding))::float AS similarity,
+    kc.metadata
+  FROM knowledge_chunks kc
+  JOIN knowledge_documents kd ON kd.id = kc.document_id
+  WHERE kc.embedding IS NOT NULL
+    AND (1 - (kc.embedding <=> query_embedding)) > match_threshold
+  ORDER BY kc.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
+
+-- ============================================================
+-- RPC: search_chunks_hybrid — Hybrid search (vector + BM25)
+-- ============================================================
+CREATE OR REPLACE FUNCTION search_chunks_hybrid(
+  query_embedding vector(1536),
+  query_text text,
+  vector_weight float DEFAULT 0.7,
+  keyword_weight float DEFAULT 0.3,
+  match_threshold float DEFAULT 0.3,
+  match_count int DEFAULT 10
+)
+RETURNS TABLE(
+  id uuid,
+  document_id uuid,
+  document_title text,
+  content text,
+  similarity float,
+  vector_score float,
+  keyword_score float,
+  source text,
+  metadata jsonb
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  WITH vector_hits AS (
+    SELECT
+      kc.id,
+      kc.document_id,
+      kd.title AS document_title,
+      kc.content,
+      (1 - (kc.embedding <=> query_embedding))::float AS vs,
+      kc.metadata
+    FROM knowledge_chunks kc
+    JOIN knowledge_documents kd ON kd.id = kc.document_id
+    WHERE kc.embedding IS NOT NULL
+      AND (1 - (kc.embedding <=> query_embedding)) > match_threshold
+  ),
+  keyword_hits AS (
+    SELECT
+      kc.id,
+      ts_rank(kc.fts, websearch_to_tsquery('simple', query_text)) AS ks
+    FROM knowledge_chunks kc
+    WHERE kc.fts @@ websearch_to_tsquery('simple', query_text)
+  ),
+  merged AS (
+    SELECT
+      v.id,
+      v.document_id,
+      v.document_title,
+      v.content,
+      v.vs,
+      COALESCE(k.ks, 0) AS ks,
+      v.metadata
+    FROM vector_hits v
+    FULL OUTER JOIN keyword_hits k ON k.id = v.id
+  )
+  SELECT
+    m.id,
+    m.document_id,
+    m.document_title,
+    m.content,
+    (COALESCE(m.vs, 0) * vector_weight + COALESCE(m.ks, 0) * keyword_weight)::float AS similarity,
+    COALESCE(m.vs, 0)::float AS vector_score,
+    COALESCE(m.ks, 0)::float AS keyword_score,
+    CASE
+      WHEN m.vs IS NOT NULL AND m.ks > 0 THEN 'hybrid'
+      WHEN m.vs IS NOT NULL THEN 'vector'
+      ELSE 'keyword'
+    END AS source,
+    m.metadata
+  FROM merged m
+  WHERE (COALESCE(m.vs, 0) * vector_weight + COALESCE(m.ks, 0) * keyword_weight) > match_threshold
+  ORDER BY similarity DESC
+  LIMIT match_count;
+END;
+$$;

@@ -72,6 +72,9 @@ export default function CardGridView() {
             ☰ 列表
           </button>
         </div>
+        <a href="/import" className="px-3 py-1.5 border border-blue-200 text-blue-600 rounded-lg text-xs hover:bg-blue-50 transition-colors font-medium">
+          📥 导入
+        </a>
         <span className="text-xs text-gray-400">{cards.length} 题</span>
       </div>
 
