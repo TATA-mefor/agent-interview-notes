@@ -181,9 +181,9 @@ Connect real MCP tools under safety gates.
 ### Read-only first, in order
 1. Filesystem MCP — read files within project root
 2. Git MCP — `git log`, `git diff`, `git status`
-3. HTTP API MCP — GET to test endpoints
-4. Database MCP — read-only queries on test DB
-5. Log MCP — tail application logs
+3. Log MCP — tail application logs
+4. HTTP API MCP — GET to test endpoints
+5. Database MCP — read-only queries on test DB
 6. Browser MCP — screenshot capture
 
 ### Per-adapter safety

@@ -34,11 +34,14 @@ Productionization means making these capabilities **real** — connecting to liv
 **Prerequisites:** Database migration tooling (currently missing in the main project).
 
 **Scope:**
-- `agent_testing_runs` table — session metadata
-- `agent_testing_evidence` table — evidence records
-- `agent_testing_reports` table — generated reports
-- `agent_testing_approval_requests` table — approval records
-- Migrations for schema creation and evolution
+- `agent_testing_sessions` table — session metadata (id, run_id, target_system_name, status, agents, limitations)
+- `agent_testing_tasks` table — task queue records (session_id FK, assigned_to, task_type, status, priority, input_refs)
+- `agent_testing_messages` table — agent communication (session_id FK, from_agent, to_agent, message_type, summary)
+- `agent_testing_blackboards` table — shared state (session_id PK FK, data JSONB)
+- `agent_testing_evidence_gaps` table — detected gaps (session_id FK, test_case_id, reason, status, summary)
+- `agent_testing_approval_requests` table — approval records (session_id FK, status, risk_level, reason)
+- `agent_testing_audit_events` table — audit trail (session_id FK, event_type, actor, outcome, summary)
+- Supabase SQL migrations for schema creation and evolution
 
 **Risks:** Schema drift without migration management. **Mitigation:** Use Supabase SQL migrations (consistent with existing project pattern) + versioned schema files before creating production tables.
 
@@ -52,7 +55,7 @@ Productionization means making these capabilities **real** — connecting to liv
 
 **Scope:**
 - Token-based or password-based auth middleware
-- `/agent-testing` UI route behind auth
+- `/admin/agent-testing` UI route behind auth
 - Real approval decision UI (approve/reject/request_more_evidence)
 - Approval decision persistence
 - Audit log of all approval decisions
@@ -68,13 +71,13 @@ Productionization means making these capabilities **real** — connecting to liv
 **Prerequisites:** Approval runtime (Track C), Audit persistence (Track E).
 
 **Recommended order:**
-1. Filesystem MCP (read-only) — safest first step
-2. Git MCP (read-only)
-3. Log monitoring MCP (read-only)
-4. HTTP API MCP (read-only, test environment only)
-5. Database MCP (read-only, test environment only)
-6. Browser automation (screenshot capture, read-only)
-7. Write-capable adapters (only after all safety gates are verified)
+1. Filesystem MCP — read-only project files (safest first step)
+2. Git MCP — git status / diff / log (read-only)
+3. Log monitoring MCP — read-only application logs (lower risk than HTTP/DB)
+4. HTTP API MCP — GET to test endpoints only (read-only, test environment)
+5. Database MCP — read-only queries on test DB only
+6. Browser automation — screenshot capture / read-only page inspection
+7. Write-capable adapters — only after all safety gates are verified
 
 **Risks:** MCP tools can read sensitive data or have side effects. **Mitigation:** Every MCP call must go through approval gate. Read-only first. Test environment only. Production MCP is the last thing to enable.
 
