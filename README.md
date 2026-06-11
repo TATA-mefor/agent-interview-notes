@@ -183,6 +183,51 @@ http://<电脑局域网IP>:3000
 - [产品规划](docs/PRODUCT_PLAN.md)
 - [参考项目](docs/references/REFERENCE_PROJECTS.md)
 
+## Agent 测试模块
+
+项目包含一个独立的 **Small System Test Agent Team** 模块，位于 `agent-testing/`。这是一个离线确定性系统测试框架，专为 10-30 人小系统设计。
+
+### 核心能力
+
+| 能力 | 说明 |
+| --- | --- |
+| 需求验收提取 | 从需求文本自动提取 must/should/could 验收点，标记歧义 |
+| 测试用例生成 | 基于验收点自动生成系统测试用例（含前置条件、步骤、预期证据） |
+| 证据标准化 | 统一 9 种执行器类型（human/api/browser/script 等），自动降级弱证据 |
+| 严重性分类 | P0/P1/P2/P3 确定性分类，标记阻断发布和回归需求 |
+| 缺陷分析 | 分析失败证据，推断受影响层级（frontend/backend/auth/permission 等） |
+| 运维检查清单 | 根据部署模式自动生成 40+ 运维检查项 |
+| 回归建议 | 基于缺陷+严重性自动生成回归测试范围和优先级 |
+| 发布建议 | 综合所有指标给出 approved/approved_with_risks/blocked/inconclusive |
+| 人机回路审批 | 对每个动作自动评估 LOW/MEDIUM/HIGH/FORBIDDEN 风险级别 |
+| 审计追踪 | 记录每一步的 Actor、Skill、MCP、证据引用和审批状态 |
+| Markdown 报告 | 生成完整系统测试报告 |
+
+### 设计原则
+
+- **证据驱动**：Agent 不能凭空证明测试通过 — pass 必须绑定真实执行证据
+- **离线确定性**：所有 Skill 都是纯函数，不依赖 LLM/MCP/数据库/网络
+- **证据降级**：`agent_reasoning + pass` 会被自动降级为 weak 证据，不能成为发布依据
+- **保守判断**：证据不足时宁可报 `unknown`/`inconclusive`，不瞎猜
+
+### 快速使用
+
+```ts
+import { runTestLeadOrchestration } from './agent-testing/src';
+import { agentNotesOrchestrationInput } from './agent-testing/test-agent-notes';
+
+const output = runTestLeadOrchestration(agentNotesOrchestrationInput);
+console.log(output.releaseRecommendation);  // → 'blocked'
+console.log(output.report);                  // → Markdown 报告
+```
+
+```bash
+# 运行项目自身的系统测试分析
+npx tsx agent-testing/test-agent-notes.ts
+```
+
+详细文档见 `agent-testing/docs/README.md` 和 `agent-testing/docs/ROADMAP.md`。
+
 ## 设计原则
 
 - 本地优先，基础 CRUD 不依赖外部 LLM。
