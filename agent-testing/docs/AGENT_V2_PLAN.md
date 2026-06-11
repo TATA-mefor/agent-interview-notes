@@ -1,5 +1,7 @@
 # Agent Testing V2 Plan — Multi-Agent 自主协作系统
 
+> **状态更新 (2026-06-11):** M0–M6 已全部完成。六个 Phase 的代码位于 `agent-testing/src/agent-runtime/`、`agent-testing/src/llm-planner/`、`agent-testing/src/ui-v2/`。最终使用说明见 `AGENT_V2_USAGE.md`，验收清单见 `AGENT_V2_FINAL_ACCEPTANCE.md`，生产化规划见 `AGENT_V2_PRODUCTIONIZATION_NOTES.md`。本文档保留作为原始设计参考。
+
 ## 1. 项目说明
 
 `agent-testing` 当前已经完成 22-phase offline roadmap，形成了一个面向 `agent-note` 项目的小型系统测试程序。当前版本以 deterministic pipeline 为核心，能够在离线、纯内存、无真实外部副作用的条件下完成：
