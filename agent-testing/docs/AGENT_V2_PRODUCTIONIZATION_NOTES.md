@@ -17,11 +17,11 @@ Productionization means making these capabilities **real** — connecting to liv
 **Prerequisites:** Auth (Track C).
 
 **Scope:**
-- `POST /api/agent-testing/runs` — create a testing session
-- `GET /api/agent-testing/runs/:id` — get session status
-- `POST /api/agent-testing/runs/:id/evidence` — submit evidence
-- `GET /api/agent-testing/runs/:id/report` — get generated report
-- `GET /api/agent-testing/runs/:id/observability` — get metrics
+- `POST /api/agent-testing/sessions` — create a testing session
+- `GET /api/agent-testing/sessions/:id` — get session status
+- `POST /api/agent-testing/sessions/:id/evidence` — submit evidence
+- `GET /api/agent-testing/sessions/:id/report` — get generated report
+- `GET /api/agent-testing/sessions/:id/observability` — get metrics
 
 **Risks:** Exposing testing data without authentication. **Mitigation:** Add auth middleware before route integration.
 
@@ -40,7 +40,7 @@ Productionization means making these capabilities **real** — connecting to liv
 - `agent_testing_approval_requests` table — approval records
 - Migrations for schema creation and evolution
 
-**Risks:** Schema drift without migration management. **Mitigation:** Introduce Prisma or Drizzle before creating tables.
+**Risks:** Schema drift without migration management. **Mitigation:** Use Supabase SQL migrations (consistent with existing project pattern) + versioned schema files before creating production tables.
 
 ---
 
@@ -152,21 +152,58 @@ Productionization means making these capabilities **real** — connecting to liv
 ## 9. Recommended Order
 
 ```
+Phase 0 (Preflight):
+  Track 0 — Productionization Preflight (fix TS errors, tag offline version)
+
 Phase A (Safe, can start now):
-  Track G — CI / Formal Test Suite
-  Track B — Database-backed Persistence (schema design only)
+  Track G — CI / Formal Test Suite (independent, low risk)
+  Track B0 — DB schema design only (no code yet)
 
 Phase B (Requires auth foundation):
-  Track C — Authentication (build auth system for main project first)
-  Track A — Real Route Integration (depends on auth)
+  Track C — Authentication + Approval Runtime
+  Track B1 — DB repositories + persistence service
+  Track A — Real Route Integration + Admin UI (behind auth)
 
 Phase C (Requires approval + audit):
   Track E — Audit Persistence and Observability Dashboard
   Track D — Real MCP Server Opt-in (read-only first)
   Track F — Controlled Execution Hardening (last, highest risk)
+  Track L — Real LLM Planner Opt-in (requires approval + audit)
 ```
 
-**The most important constraint:** Tracks D and F must not start before Tracks C and E are solid. Real MCP and real execution without approval and audit is dangerous. Fake planner output must never be treated as a reason to skip approval.
+**The most important constraint:** Tracks D, F, and L must not start before Tracks C and E are solid. Real MCP, real execution, and real LLM without approval and audit is dangerous. Fake planner output must never be treated as a reason to skip approval.
+
+## 10. Safety Gate Matrix
+
+Every real capability must pass its safety gate before activation.
+
+| Capability | Auth | Approval | Audit | Sandbox | Env Limit | Output Redaction |
+|---|---:|---:|---:|---:|---:|---:|
+| Admin UI | required | optional | required | n/a | required | required |
+| Evidence Submit | required | optional | required | n/a | required | required |
+| Read-only MCP | required | required | required | n/a | test-first | required |
+| Controlled Command | required | required | required | required | test-only | required |
+| Browser Automation | required | required | required | required | test-only | required |
+| DB Read MCP | required | required | required | n/a | test-only | required |
+| DB Write MCP | required | required | required | required | non-prod only | required |
+| Real LLM Planner | required | required | required | n/a | required | required |
+
+## 11. Runtime Feature Flags and Kill Switches
+
+```
+AGENT_TESTING_ENABLED=false                    # Master kill switch
+AGENT_TESTING_REAL_MCP_ENABLED=false           # Real MCP (vs fake/dry-run)
+AGENT_TESTING_CONTROLLED_EXECUTION_ENABLED=false # Real commands
+AGENT_TESTING_REAL_LLM_ENABLED=false           # Real LLM planner
+AGENT_TESTING_BROWSER_AUTOMATION_ENABLED=false  # Real browser
+AGENT_TESTING_DB_MCP_ENABLED=false             # Real DB MCP
+AGENT_TESTING_WRITE_ACTIONS_ENABLED=false       # Any write-capable action
+```
+
+- If `AGENT_TESTING_ENABLED=false`, all routes return 503.
+- If real MCP flag is false, only fake/simulated MCP.
+- If controlled execution flag is false, commands stay dry-run.
+- Flags read from `app_settings` at request time.
 
 ---
 
@@ -174,12 +211,15 @@ Phase C (Requires approval + audit):
 
 | Track | Risk Level | Prerequisites | Can Start |
 |---|---|---|---|
-| G — CI / Test Suite | Low | None | Now |
-| B — DB Persistence | Low | Migration tooling | After migration tool added |
-| C — Auth + Approval UI | High | Main project auth | After auth foundation |
-| A — Route Integration | Medium | Auth (Track C) | After Track C |
-| E — Audit Persistence | Medium | DB (Track B) | After Track B |
-| D — Real MCP | High | Approval + Audit | After Tracks C + E |
-| F — Real Execution | Critical | Approval + Audit + Sandbox | After Tracks C + E + sandbox |
+| 0 — Preflight | Low | None | Now |
+| G — CI / Test Suite | Low | Track 0 | After Track 0 |
+| B0 — DB Schema Design | Low | Track 0 | After Track 0 |
+| C — Auth + Approval UI | High | Track 0 | After Track 0 |
+| B1 — DB Repos + Persistence | Low | B0 | After B0 |
+| A — Route Integration | Medium | C (Auth) | After Track C |
+| E — Audit Persistence | Medium | B1 (DB) | After Track B1 |
+| D — Real MCP | High | C + E | After Tracks C + E |
+| F — Real Execution | Critical | C + E + Sandbox | After Tracks C + E + sandbox |
+| L — Real LLM | High | C + E | After Tracks C + E |
 
-**Do NOT productionize these tracks in parallel without safety gates.** Each track's safety boundary must be verified before the next riskier track begins.
+**Do NOT productionize high-risk tracks in parallel without safety gates.** Each track's safety boundary must be verified before the next riskier track begins.
