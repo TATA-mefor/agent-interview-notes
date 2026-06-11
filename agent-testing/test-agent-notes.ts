@@ -94,7 +94,7 @@ const modules = [
 const opsProfile = {
   targetSystemName: 'Agent Interview Notes',
   targetSystemType: 'web_app',
-  deploymentMode: 'docker_compose' as const,
+  deploymentMode: 'containerized' as const,
   userScale: 'team_10_30' as const,
   modules,
   hasAuthentication: false,        // 本地优先，无登录系统
@@ -561,8 +561,8 @@ console.log('-'.repeat(40));
 output.opsChecklist.slice(0, 10).forEach((item) => {
   const category = item.category || 'general';
   console.log(`  [${category}] ${item.title}`);
-  if (item.releaseBlocking) console.log(`     🚫 阻断发布`);
-  if (item.recommendedEvidence) console.log(`     📎 建议证据: ${item.recommendedEvidence}`);
+  if (item.blockingIfFailed) console.log(`     🚫 阻断发布`);
+  if (item.requiredEvidence.length > 0) console.log(`     📎 需要证据: ${item.requiredEvidence.join(', ')}`);
 });
 if (output.opsChecklist.length > 10) {
   console.log(`  ... 还有 ${output.opsChecklist.length - 10} 项`);
@@ -573,11 +573,11 @@ console.log('');
 console.log('🐛 缺陷分析');
 console.log('-'.repeat(40));
 output.defectAnalyses.forEach((da, i) => {
-  console.log(`  ${i + 1}. ${da.title || '未命名缺陷'}`);
+  console.log(`  ${i + 1}. ${da.possibleCause.slice(0, 60) || '未命名缺陷'}`);
   console.log(`     疑似层级: ${da.suspectedLayer}`);
   console.log(`     根因类别: ${da.causeCategory}`);
   console.log(`     可能原因: ${da.possibleCause}`);
-  console.log(`     修复建议: ${da.remediation}`);
+  console.log(`     修复建议: ${da.fixSuggestion}`);
 });
 console.log('');
 
