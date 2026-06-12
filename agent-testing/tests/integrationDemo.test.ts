@@ -1,16 +1,39 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// ── Side-effect guards: mocks hoisted before any imports ──
+
+// Mock child_process: any require/import returns throwing stubs
+vi.mock('child_process', () => ({
+  exec: vi.fn(() => { throw new Error('child_process.exec must not be called in offline demo'); }),
+  execFile: vi.fn(() => { throw new Error('child_process.execFile must not be called in offline demo'); }),
+  spawn: vi.fn(() => { throw new Error('child_process.spawn must not be called in offline demo'); }),
+  execSync: vi.fn(() => { throw new Error('child_process.execSync must not be called in offline demo'); }),
+}));
+
+// Mock fs write APIs: any require/import returns throwing stubs for write methods
+vi.mock('fs', () => {
+  const actual = vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    writeFileSync: vi.fn(() => { throw new Error('fs.writeFileSync must not be called in offline demo'); }),
+    writeFile: vi.fn((_p, _d, cb: any) => { cb?.(new Error('fs.writeFile must not be called in offline demo')); }),
+    appendFileSync: vi.fn(() => { throw new Error('fs.appendFileSync must not be called in offline demo'); }),
+    appendFile: vi.fn((_p, _d, cb: any) => { cb?.(new Error('fs.appendFile must not be called in offline demo')); }),
+  };
+});
+
+// Stub global fetch before any module that might access it
+vi.stubGlobal('fetch', vi.fn(() => {
+  throw new Error('globalThis.fetch must not be called in offline demo');
+}));
+
+// ── Imports after guards ──
 import { runSmallNoteMultiAgentRuntimeDemo } from '../src/agent-runtime/agentRunner';
 import { buildMultiAgentSessionViewModel } from '../src/ui-v2/multiAgentSessionMappers';
 import { DEFAULT_AGENT_PROFILES } from '../src/agent-runtime/agentProfileTypes';
 
 describe('Integration Demo', () => {
-  // Spy on dangerous APIs before running demo
-  beforeAll(() => {
-    vi.spyOn(globalThis, 'fetch' as any).mockImplementation(() => {
-      throw new Error('fetch must not be called in offline demo');
-    });
-  });
-
+  // Run demo AFTER mocks are in place (top-level describe runs after all imports resolve)
   const demo = runSmallNoteMultiAgentRuntimeDemo();
 
   it('demo returns session with tasks', () => {
@@ -29,8 +52,6 @@ describe('Integration Demo', () => {
 
   it('evidence gaps are detected', () => {
     expect(demo.blackboardSummary.normalizedEvidenceCount).toBeGreaterThan(0);
-    // demo fixture has evidence, but auto-generated test cases have no linked evidence
-    // so gaps or unknowns should exist
     const hasIssues =
       demo.blackboardSummary.normalizedEvidenceCount > 0 ||
       demo.warnings.some((w) => /gap|evidence|missing/i.test(w));
@@ -38,13 +59,11 @@ describe('Integration Demo', () => {
   });
 
   it('no evidence does not pass', () => {
-    // Check that the demo output does not treat no-evidence test cases as passed
     const allText = [
       ...demo.warnings,
       ...demo.limitations,
       JSON.stringify(demo.blackboardSummary),
     ].join(' ').toLowerCase();
-    // Warnings should mention gaps or the limitations should state evidence constraints
     const hasEvidenceWarning =
       allText.includes('gap') ||
       allText.includes('evidence') ||
@@ -53,45 +72,36 @@ describe('Integration Demo', () => {
   });
 
   it('fake MCP / simulated execution is not treated as real evidence', () => {
-    // The demo runs with M5 placeholders — no real MCP should execute
     const allText = JSON.stringify(demo).toLowerCase();
-    // Must not contain signs of real execution
     expect(allText).not.toMatch(/"status":\s*"executed_real"/);
   });
 
   it('demo does not call fetch (HTTP)', () => {
-    // fetch spy would throw if called (set in beforeAll)
-    // If we got here without error, fetch was not called
-    expect(true).toBe(true);
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('demo does not call child_process', () => {
-    // Check that no child_process import exists in agentRunner or its deps
-    // The demo is pure in-memory — verified by the fact it runs without Node child_process
-    const agentRunnerSource = require('fs').readFileSync(
-      require('path').resolve(__dirname, '../src/agent-runtime/agentRunner.ts'),
-      'utf-8'
-    );
-    expect(agentRunnerSource).not.toMatch(/require\(['"]child_process['"]\)/);
-    expect(agentRunnerSource).not.toMatch(/from ['"]child_process['"]/);
+  it('demo does not call child_process.exec / execFile / spawn', async () => {
+    const cp = await import('child_process');
+    const execMock = (cp.exec as ReturnType<typeof vi.fn>);
+    const execFileMock = (cp.execFile as ReturnType<typeof vi.fn>);
+    const spawnMock = (cp.spawn as ReturnType<typeof vi.fn>);
+    expect(execMock).not.toHaveBeenCalled();
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
-  it('demo does not write to filesystem', () => {
-    const allSources = [
-      'agentRunner.ts',
-      'skillRouter.ts',
-      'agentSession.ts',
-      'agentTaskQueue.ts',
-      'sharedBlackboard.ts',
-      'agentMessageBus.ts',
-    ].map((f) => {
-      const fs = require('fs');
-      return fs.readFileSync(
-        require('path').resolve(__dirname, '../src/agent-runtime', f),
-        'utf-8'
-      );
-    }).join('\n');
-    expect(allSources).not.toMatch(/writeFileSync|writeFile\(/);
+  it('demo does not call fs writeFileSync / writeFile / appendFileSync / appendFile', async () => {
+    const fs = await import('fs');
+    const writeFileSyncMock = (fs.writeFileSync as ReturnType<typeof vi.fn>);
+    const writeFileMock = (fs.writeFile as ReturnType<typeof vi.fn>);
+    const appendFileSyncMock = (fs.appendFileSync as ReturnType<typeof vi.fn>);
+    const appendFileMock = (fs.appendFile as ReturnType<typeof vi.fn>);
+    expect(writeFileSyncMock).not.toHaveBeenCalled();
+    // writeFile / appendFile are callback-based — CB error would bubble; mock itself should be clean
+    expect(writeFileMock).not.toHaveBeenCalled();
+    expect(appendFileSyncMock).not.toHaveBeenCalled();
+    expect(appendFileMock).not.toHaveBeenCalled();
   });
 
   it('UI view model builds from demo output', () => {
@@ -106,6 +116,7 @@ describe('Integration Demo', () => {
   });
 
   it('profile validation passes', () => {
+    expect(demo.profileValidation).toBeDefined();
     expect(demo.profileValidation.valid).toBe(true);
   });
 
