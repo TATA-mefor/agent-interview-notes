@@ -31,7 +31,7 @@ Productionization means making these capabilities **real** — connecting to liv
 
 **What:** Replace the in-memory `InMemoryAgentTestingStore` with PostgreSQL repository implementations.
 
-**Prerequisites:** Database migration tooling (currently missing in the main project).
+**Prerequisites:** Database schema in `supabase/schema.sql` (Track B0 designs tables; Track B1 implements repositories).
 
 **Scope:**
 - `agent_testing_sessions` table — session metadata (id, run_id, target_system_name, status, agents, limitations)
@@ -41,9 +41,9 @@ Productionization means making these capabilities **real** — connecting to liv
 - `agent_testing_evidence_gaps` table — detected gaps (session_id FK, test_case_id, reason, status, summary)
 - `agent_testing_approval_requests` table — approval records (session_id FK, status, risk_level, reason)
 - `agent_testing_audit_events` table — audit trail (session_id FK, event_type, actor, outcome, summary)
-- Supabase SQL migrations for schema creation and evolution
+- `supabase/schema.sql` for schema definition
 
-**Risks:** Schema drift without migration management. **Mitigation:** Use Supabase SQL migrations (consistent with existing project pattern) + versioned schema files before creating production tables.
+**Risks:** Schema drift without migration management. **Mitigation:** Use `supabase/schema.sql` for versioned schema definition before creating production tables.
 
 ---
 

@@ -284,7 +284,7 @@ DECLARE
   tbl TEXT;
 BEGIN
   FOR tbl IN
-    SELECT unnest(ARRAY['cards', 'card_links', 'review_tasks', 'knowledge_documents', 'import_jobs', 'app_settings'])
+    SELECT unnest(ARRAY['cards', 'card_links', 'review_tasks', 'knowledge_documents', 'import_jobs', 'app_settings', 'agent_testing_sessions', 'agent_testing_tasks', 'agent_testing_blackboards', 'agent_testing_evidence_gaps', 'agent_testing_approval_requests'])
   LOOP
     EXECUTE format(
       'DROP TRIGGER IF EXISTS set_updated_at ON %I;
@@ -426,3 +426,253 @@ BEGIN
   LIMIT match_count;
 END;
 $$;
+
+-- ============================================================
+-- 12–18. Agent Testing V2 — Production Tables (Track B0)
+-- ============================================================
+-- Schema approach:        Supabase SQL + db.from(TABLE)
+-- No ORM:                 No Prisma, Drizzle, or TypeORM
+-- updated_at:             Follows existing update_updated_at_column() trigger
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 12. agent_testing_sessions
+-- ------------------------------------------------------------
+-- Stores multi-agent session metadata. One row per testing session.
+
+CREATE TABLE IF NOT EXISTS agent_testing_sessions (
+  id                  TEXT PRIMARY KEY,
+  run_id              TEXT NOT NULL,
+  target_system_name  TEXT NOT NULL,
+  status              TEXT NOT NULL,
+  agents              JSONB NOT NULL DEFAULT '[]'::JSONB,
+  limitations         JSONB NOT NULL DEFAULT '[]'::JSONB,
+  created_by          TEXT,
+  completed_at        TIMESTAMPTZ,
+  metadata            JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE agent_testing_sessions IS
+  'Multi-agent testing session metadata. Tracks session lifecycle from draft to completed/failed.';
+
+-- ------------------------------------------------------------
+-- 13. agent_testing_tasks
+-- ------------------------------------------------------------
+-- Stores AgentTask records. Child of agent_testing_sessions.
+
+CREATE TABLE IF NOT EXISTS agent_testing_tasks (
+  id                    TEXT PRIMARY KEY,
+  session_id            TEXT NOT NULL
+                          REFERENCES agent_testing_sessions(id)
+                          ON DELETE CASCADE,
+  trace_id              TEXT NOT NULL,
+  assigned_to           TEXT NOT NULL,
+  created_by            TEXT NOT NULL,
+  task_type             TEXT NOT NULL,
+  goal                  TEXT NOT NULL,
+  input_refs            JSONB NOT NULL DEFAULT '[]'::JSONB,
+  expected_output       TEXT,
+  status                TEXT NOT NULL,
+  priority              TEXT NOT NULL,
+  requires_approval     BOOLEAN NOT NULL DEFAULT FALSE,
+  related_evidence_ids  JSONB NOT NULL DEFAULT '[]'::JSONB,
+  related_test_case_ids JSONB NOT NULL DEFAULT '[]'::JSONB,
+  limitations           JSONB NOT NULL DEFAULT '[]'::JSONB,
+  error_summary         TEXT,
+  metadata              JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at          TIMESTAMPTZ
+);
+
+COMMENT ON TABLE agent_testing_tasks IS
+  'AgentTask records. Each task belongs to a session and tracks assignment, status, priority, and output refs.';
+
+-- ------------------------------------------------------------
+-- 14. agent_testing_messages
+-- ------------------------------------------------------------
+-- Stores AgentMessage / message bus timeline records.
+-- No updated_at column — messages are append-only.
+
+CREATE TABLE IF NOT EXISTS agent_testing_messages (
+  id                    TEXT PRIMARY KEY,
+  session_id            TEXT NOT NULL
+                          REFERENCES agent_testing_sessions(id)
+                          ON DELETE CASCADE,
+  trace_id              TEXT NOT NULL,
+  from_agent            TEXT NOT NULL,
+  to_agent              TEXT NOT NULL,
+  message_type          TEXT NOT NULL,
+  summary               TEXT NOT NULL,
+  payload_ref           JSONB,
+  artifacts             JSONB NOT NULL DEFAULT '[]'::JSONB,
+  related_task_id       TEXT,
+  related_evidence_ids  JSONB NOT NULL DEFAULT '[]'::JSONB,
+  related_test_case_ids JSONB NOT NULL DEFAULT '[]'::JSONB,
+  limitations           JSONB NOT NULL DEFAULT '[]'::JSONB,
+  metadata              JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE agent_testing_messages IS
+  'AgentMessage bus timeline. Records inter-agent communication, task results, evidence requests, and report updates. Append-only.';
+
+-- ------------------------------------------------------------
+-- 15. agent_testing_blackboards
+-- ------------------------------------------------------------
+-- Stores SharedBlackboard snapshots. One row per session (session_id PK + FK).
+
+CREATE TABLE IF NOT EXISTS agent_testing_blackboards (
+  session_id  TEXT PRIMARY KEY
+                REFERENCES agent_testing_sessions(id)
+                ON DELETE CASCADE,
+  data        JSONB NOT NULL,
+  unknowns    JSONB NOT NULL DEFAULT '[]'::JSONB,
+  limitations JSONB NOT NULL DEFAULT '[]'::JSONB,
+  version     INTEGER NOT NULL DEFAULT 1,
+  metadata    JSONB NOT NULL DEFAULT '{}'::JSONB,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE agent_testing_blackboards IS
+  'SharedBlackboard snapshots. Persistence layer must redact secrets and large raw evidence before storage.';
+
+-- ------------------------------------------------------------
+-- 16. agent_testing_evidence_gaps
+-- ------------------------------------------------------------
+-- Stores evidence gaps identified by EvidenceCollector.
+
+CREATE TABLE IF NOT EXISTS agent_testing_evidence_gaps (
+  id                    TEXT PRIMARY KEY,
+  session_id            TEXT NOT NULL
+                          REFERENCES agent_testing_sessions(id)
+                          ON DELETE CASCADE,
+  test_case_id          TEXT,
+  related_evidence_ids  JSONB NOT NULL DEFAULT '[]'::JSONB,
+  reason                TEXT NOT NULL,
+  status                TEXT NOT NULL,
+  summary               TEXT NOT NULL,
+  recommended_action    TEXT,
+  severity_hint         TEXT,
+  limitations           JSONB NOT NULL DEFAULT '[]'::JSONB,
+  metadata              JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE agent_testing_evidence_gaps IS
+  'Evidence gaps detected by EvidenceCollector. Tracks open/partially_covered/covered status per test case.';
+
+-- ------------------------------------------------------------
+-- 17. agent_testing_approval_requests
+-- ------------------------------------------------------------
+-- Stores approval requests and human decisions.
+
+CREATE TABLE IF NOT EXISTS agent_testing_approval_requests (
+  id                      TEXT PRIMARY KEY,
+  session_id              TEXT NOT NULL
+                            REFERENCES agent_testing_sessions(id)
+                            ON DELETE CASCADE,
+  agent_role              TEXT,
+  action_type             TEXT NOT NULL,
+  risk_level              TEXT NOT NULL,
+  status                  TEXT NOT NULL,
+  reason                  TEXT,
+  decision                TEXT,
+  decided_by              TEXT,
+  decided_at              TIMESTAMPTZ,
+  related_task_id         TEXT,
+  related_mcp_request_id  TEXT,
+  limitations             JSONB NOT NULL DEFAULT '[]'::JSONB,
+  metadata                JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE agent_testing_approval_requests IS
+  'Approval requests for controlled actions. Tracks risk_level, human decision, and decision audit trail.';
+
+-- ------------------------------------------------------------
+-- 18. agent_testing_audit_events
+-- ------------------------------------------------------------
+-- Stores audit events. Insert-only at service/repository level.
+-- session_id is nullable to support global/system audit events
+-- (e.g. feature flag disabled, route access denied, auth failure).
+-- No updated_at column — audit events are insert-only.
+
+CREATE TABLE IF NOT EXISTS agent_testing_audit_events (
+  id                          TEXT PRIMARY KEY,
+  session_id                  TEXT
+                                REFERENCES agent_testing_sessions(id)
+                                ON DELETE CASCADE,
+  event_type                  TEXT NOT NULL,
+  actor                       JSONB,
+  outcome                     TEXT NOT NULL,
+  summary                     TEXT NOT NULL,
+  privacy_level               TEXT,
+  artifact_refs               JSONB NOT NULL DEFAULT '[]'::JSONB,
+  related_task_id             TEXT,
+  related_approval_request_id TEXT,
+  related_mcp_request_id      TEXT,
+  limitations                 JSONB NOT NULL DEFAULT '[]'::JSONB,
+  metadata                    JSONB NOT NULL DEFAULT '{}'::JSONB,
+  created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE agent_testing_audit_events IS
+  'Insert-only audit events for agent-testing. Store summaries and refs only; never store raw secrets, full logs, full HTTP responses, or raw database rows. session_id is nullable for global/system audit events.';
+
+-- ============================================================
+-- Agent Testing V2 — Indexes
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_sessions_created_at
+  ON agent_testing_sessions(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_sessions_status
+  ON agent_testing_sessions(status);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_tasks_session_id
+  ON agent_testing_tasks(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_tasks_status
+  ON agent_testing_tasks(status);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_tasks_assigned_to
+  ON agent_testing_tasks(assigned_to);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_messages_session_id
+  ON agent_testing_messages(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_messages_created_at
+  ON agent_testing_messages(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_evidence_gaps_session_id
+  ON agent_testing_evidence_gaps(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_evidence_gaps_status
+  ON agent_testing_evidence_gaps(status);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_approval_requests_session_id
+  ON agent_testing_approval_requests(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_approval_requests_status
+  ON agent_testing_approval_requests(status);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_audit_events_session_id
+  ON agent_testing_audit_events(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_testing_audit_events_created_at
+  ON agent_testing_audit_events(created_at DESC);
+
+-- ============================================================
+-- Agent Testing V2 — RLS Placeholder
+-- ============================================================
+-- Track C will add Row Level Security policies. Current plan:
+-- - Production routes must pass /admin/* auth.
+-- - API must not expose public Supabase access.
+-- - DB tables must not be publicly writable.
+-- - RLS policies to be added in Track C alongside auth implementation.
+-- ============================================================

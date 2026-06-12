@@ -85,7 +85,7 @@ Follows existing `NextRequest → Service → NextResponse` convention with `{ d
 Replace in-memory state with PostgreSQL tables.
 
 ### DB Approach
-Use Supabase SQL migrations + `db.from(TABLE)` repository pattern — consistent with existing project infrastructure. **Do not introduce Prisma or Drizzle.** The project already uses Supabase client + raw SQL in `supabase/schema.sql`.
+Use Supabase SQL in `supabase/schema.sql` + `db.from(TABLE)` repository pattern — consistent with existing project infrastructure. **Do not introduce Prisma or Drizzle.** No migration directory; schema is versioned in `supabase/schema.sql`.
 
 ### 7 New Tables (add to `supabase/schema.sql`)
 
@@ -382,7 +382,7 @@ AGENT_TESTING_WRITE_ACTIONS_ENABLED=false       # Any write-capable action
 ```
 Week 0:  Track 0  — Preflight (fix TS errors, tag offline version)
 Week 1:  Track G  — CI / Test Suite (safe, immediate value)
-Week 2:  Track B0 — DB schema design + migration (no code yet)
+Week 2:  Track B0 — DB schema design in schema.sql (no code yet)
 Week 3-4: Track C — Auth + Approval Runtime
 Week 5-6: Track B1 — DB repositories + persistence service
 Week 7-8: Track A — Routes + Admin UI (now behind auth)
