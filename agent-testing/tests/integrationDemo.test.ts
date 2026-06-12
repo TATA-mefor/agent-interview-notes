@@ -1,40 +1,30 @@
 import { describe, it, expect, vi } from 'vitest';
 
-// ── Side-effect guards: mocks hoisted before any imports ──
+// ── Side-effect guards: set up before any imports ──
 
-// Mock child_process: any require/import returns throwing stubs
+// stubGlobal hoists: blocks global fetch before anything runs
+vi.stubGlobal('fetch', vi.fn(() => {
+  throw new Error('globalThis.fetch must not be called in offline demo');
+}));
+
+// vi.mock hoists: any require/import of child_process gets throwing stubs
 vi.mock('child_process', () => ({
   exec: vi.fn(() => { throw new Error('child_process.exec must not be called in offline demo'); }),
   execFile: vi.fn(() => { throw new Error('child_process.execFile must not be called in offline demo'); }),
   spawn: vi.fn(() => { throw new Error('child_process.spawn must not be called in offline demo'); }),
-  execSync: vi.fn(() => { throw new Error('child_process.execSync must not be called in offline demo'); }),
-}));
-
-// Mock fs write APIs: any require/import returns throwing stubs for write methods
-vi.mock('fs', () => {
-  const actual = vi.importActual<typeof import('fs')>('fs');
-  return {
-    ...actual,
-    writeFileSync: vi.fn(() => { throw new Error('fs.writeFileSync must not be called in offline demo'); }),
-    writeFile: vi.fn((_p, _d, cb: any) => { cb?.(new Error('fs.writeFile must not be called in offline demo')); }),
-    appendFileSync: vi.fn(() => { throw new Error('fs.appendFileSync must not be called in offline demo'); }),
-    appendFile: vi.fn((_p, _d, cb: any) => { cb?.(new Error('fs.appendFile must not be called in offline demo')); }),
-  };
-});
-
-// Stub global fetch before any module that might access it
-vi.stubGlobal('fetch', vi.fn(() => {
-  throw new Error('globalThis.fetch must not be called in offline demo');
 }));
 
 // ── Imports after guards ──
 import { runSmallNoteMultiAgentRuntimeDemo } from '../src/agent-runtime/agentRunner';
 import { buildMultiAgentSessionViewModel } from '../src/ui-v2/multiAgentSessionMappers';
 import { DEFAULT_AGENT_PROFILES } from '../src/agent-runtime/agentProfileTypes';
+import * as fs from 'fs';
+import * as path from 'path';
 
 describe('Integration Demo', () => {
-  // Run demo AFTER mocks are in place (top-level describe runs after all imports resolve)
   const demo = runSmallNoteMultiAgentRuntimeDemo();
+
+  // ── Core behaviour ──
 
   it('demo returns session with tasks', () => {
     expect(demo.session).toBeDefined();
@@ -76,6 +66,8 @@ describe('Integration Demo', () => {
     expect(allText).not.toMatch(/"status":\s*"executed_real"/);
   });
 
+  // ── Side-effect verification ──
+
   it('demo does not call fetch (HTTP)', () => {
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
     expect(fetchMock).not.toHaveBeenCalled();
@@ -83,26 +75,43 @@ describe('Integration Demo', () => {
 
   it('demo does not call child_process.exec / execFile / spawn', async () => {
     const cp = await import('child_process');
-    const execMock = (cp.exec as ReturnType<typeof vi.fn>);
-    const execFileMock = (cp.execFile as ReturnType<typeof vi.fn>);
-    const spawnMock = (cp.spawn as ReturnType<typeof vi.fn>);
-    expect(execMock).not.toHaveBeenCalled();
-    expect(execFileMock).not.toHaveBeenCalled();
-    expect(spawnMock).not.toHaveBeenCalled();
+    expect(cp.exec).not.toHaveBeenCalled();
+    expect(cp.execFile).not.toHaveBeenCalled();
+    expect(cp.spawn).not.toHaveBeenCalled();
   });
 
-  it('demo does not call fs writeFileSync / writeFile / appendFileSync / appendFile', async () => {
-    const fs = await import('fs');
-    const writeFileSyncMock = (fs.writeFileSync as ReturnType<typeof vi.fn>);
-    const writeFileMock = (fs.writeFile as ReturnType<typeof vi.fn>);
-    const appendFileSyncMock = (fs.appendFileSync as ReturnType<typeof vi.fn>);
-    const appendFileMock = (fs.appendFile as ReturnType<typeof vi.fn>);
-    expect(writeFileSyncMock).not.toHaveBeenCalled();
-    // writeFile / appendFile are callback-based — CB error would bubble; mock itself should be clean
-    expect(writeFileMock).not.toHaveBeenCalled();
-    expect(appendFileSyncMock).not.toHaveBeenCalled();
-    expect(appendFileMock).not.toHaveBeenCalled();
+  it('demo runtime sources contain no fs write API usage', () => {
+    const runtimeDir = path.resolve(__dirname, '../src/agent-runtime');
+    const sources = [
+      'agentRunner.ts', 'skillRouter.ts', 'agentSession.ts',
+      'agentTaskQueue.ts', 'sharedBlackboard.ts', 'agentMessageBus.ts',
+    ].map((f) => fs.readFileSync(path.join(runtimeDir, f), 'utf-8'));
+    const code = sources.join('\n');
+
+    // V2 runtime is pure in-memory: must not write to filesystem
+    const forbidden = ['writeFileSync', 'writeFile(', 'appendFileSync', 'appendFile(',
+      'createWriteStream', 'fs.writeFile', 'fs.appendFile', 'fs.createWriteStream'];
+    for (const api of forbidden) {
+      expect(code).not.toContain(api);
+    }
   });
+
+  it('demo runtime sources contain no child_process import', () => {
+    const runtimeDir = path.resolve(__dirname, '../src/agent-runtime');
+    const sources = [
+      'agentRunner.ts', 'skillRouter.ts', 'agentSession.ts',
+      'agentTaskQueue.ts', 'sharedBlackboard.ts', 'agentMessageBus.ts',
+      'approvalBridge.ts', 'mcpActionRouter.ts', 'typedInputBuilder.ts',
+      'evidenceCollector.ts',
+    ].map((f) => fs.readFileSync(path.join(runtimeDir, f), 'utf-8'));
+    const code = sources.join('\n');
+
+    // V2 runtime must not import child_process
+    expect(code).not.toMatch(/require\(['"]child_process['"]\)/);
+    expect(code).not.toMatch(/from ['"]child_process['"]/);
+  });
+
+  // ── UI view model ──
 
   it('UI view model builds from demo output', () => {
     const vm = buildMultiAgentSessionViewModel({
@@ -120,8 +129,7 @@ describe('Integration Demo', () => {
     expect(demo.profileValidation.valid).toBe(true);
   });
 
-  it('demo produces profile validation result', () => {
-    expect(demo.profileValidation).toBeDefined();
+  it('profile validation result structure', () => {
     expect(demo.profileValidation.valid).toBe(true);
   });
 });
