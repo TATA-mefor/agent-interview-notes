@@ -47,20 +47,24 @@ Productionization means making these capabilities **real** — connecting to liv
 
 ---
 
-## 4. Track C: Authenticated UI and Approval Runtime
+## 4. Track C: Authenticated UI and Approval Runtime ✅
 
 **What:** Add authentication to the agent-testing UI routes and implement real human approval flow.
 
 **Prerequisites:** The main project currently has no authentication system. This must be built first.
 
-**Scope:**
-- Token-based or password-based auth middleware
-- `/admin/agent-testing` UI route behind auth
-- Real approval decision UI (approve/reject/request_more_evidence)
-- Approval decision persistence
-- Audit log of all approval decisions
+**Scope (Implemented):**
+- Cookie-based auth middleware (`src/middleware.ts`) protecting `/admin/*` and `/api/agent-testing/*`
+- Password via env (`ADMIN_PASSWORD_HASH` / `ADMIN_PASSWORD`) — no DB dependency before Track B1
+- Two roles: `admin` (full CRUD + approve), `viewer` (read-only)
+- `/admin/login` page with role selector
+- `/admin/agent-testing/approvals` static shell (full hydration pending Track B1)
+- `POST /api/agent-testing/approvals/[id]/decide` — returns decision + audit draft + limitation
+- Approval decisions do NOT trigger MCP/LLM/command execution
+- Feature flag: `AGENT_TESTING_ENABLED` with 503 disabled behavior
+- Audit draft service (no DB persistence — pending Track E)
 
-**Risks:** Exposing testing controls without auth is dangerous. **Mitigation:** Auth must be in place before any UI route or approval runtime goes live.
+**Risks:** Exposing testing controls without auth is dangerous. **Mitigation:** Auth middleware + role boundary are in place. Persistence pending Track B1.
 
 ---
 

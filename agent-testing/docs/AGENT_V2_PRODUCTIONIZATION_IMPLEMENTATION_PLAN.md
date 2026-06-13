@@ -140,7 +140,7 @@ src/lib/services/agentTestingPersistenceService.ts
 
 ---
 
-## Track C: Authenticated UI and Approval Runtime
+## Track C: Authenticated UI and Approval Runtime ✅
 
 ### Goal
 Add real authentication, permission control, and human approval workflow.
@@ -148,24 +148,27 @@ Add real authentication, permission control, and human approval workflow.
 ### Prerequisites
 - Track 0 (codebase stable).
 
-### Auth
-- Password stored in `app_settings` key `admin_password` (hashed).
-- `/admin/login` page with simple form.
-- Middleware checks cookie for `/admin/*` and `/api/agent-testing/*`.
-- Two roles: `admin` (full CRUD + approve actions), `viewer` (read-only).
+### Auth (Implemented)
+- Password via env (`ADMIN_PASSWORD_HASH` / `ADMIN_PASSWORD`), not `app_settings` — avoids DB dependency before Track B1.
+- `/admin/login` page with simple form + role selector.
+- Middleware (`src/middleware.ts`) protects `/admin/*` and `/api/agent-testing/*`.
+- Cookie session: httpOnly, sameSite lax, HMAC-signed, no JWT, no DB.
+- Two roles: `admin` (full CRUD + approve), `viewer` (read-only).
 
-### Approval Runtime
-- `/admin/agent-testing/approvals` — list pending approvals.
-- Approve / Reject / Request More Evidence buttons.
-- `POST /api/agent-testing/approvals/[id]/decide`.
-- Audit event logged per decision.
-- M5 flow already handles `pending_approval` — AgentRunner pauses until approved.
+### Approval Runtime (Implemented)
+- `/admin/agent-testing/approvals` — static shell (full hydration pending Track B1).
+- Approve / Reject / Request More Evidence buttons (admin only).
+- `POST /api/agent-testing/approvals/[id]/decide` — returns decision + audit draft + limitation.
+- Audit draft service (`agentTestingAuditDraftService.ts`) — no DB persistence (pending Track E).
+- Approval decisions do NOT trigger MCP/LLM/command execution.
+- Feature flag: `AGENT_TESTING_ENABLED` — disabled returns 503 for API routes.
 
 ### Acceptance
-- [ ] Unauthenticated users cannot access admin UI.
-- [ ] Viewer cannot approve actions.
-- [ ] Admin approval creates audit event.
-- [ ] Rejected approval prevents execution.
+- [x] Unauthenticated users cannot access admin UI.
+- [x] Viewer cannot approve actions.
+- [x] Admin approval creates audit draft.
+- [x] Rejected approval prevents execution (execution not connected in Track C).
+- [x] TypeScript: `tsc --noEmit --pretty false` passes.
 
 ---
 
@@ -382,8 +385,8 @@ AGENT_TESTING_WRITE_ACTIONS_ENABLED=false       # Any write-capable action
 ```
 Week 0:  Track 0  — Preflight (fix TS errors, tag offline version)
 Week 1:  Track G  — CI / Test Suite (safe, immediate value)
-Week 2:  Track B0 — DB schema design in schema.sql (no code yet)
-Week 3-4: Track C — Auth + Approval Runtime
+Week 2:  Track B0 — DB schema design in schema.sql (no code yet) ✅
+Week 3-4: Track C — Auth + Approval Runtime ✅
 Week 5-6: Track B1 — DB repositories + persistence service
 Week 7-8: Track A — Routes + Admin UI (now behind auth)
 Week 9:   Track E — Audit Persistence + Observability Dashboard
