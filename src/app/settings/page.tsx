@@ -4,6 +4,7 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold text-gray-900">设置</h1>
       <p className="text-gray-500 mt-1">系统设置与配置</p>
       <div className="mt-6 space-y-3">
+        <SettingsLink href="/settings/todos" title="待办设置" desc="每日预习题量（10–20 题）" />
         <SettingsLink href="/settings/llm" title="LLM 设置" desc="配置 AI 模型供应商和 API Key" />
         <SettingsLink href="/settings/local" title="本地部署" desc="局域网访问、PWA、Docker 配置" />
         <SettingsLink href="/settings/backup" title="备份恢复" desc="数据备份、恢复和迁移" />

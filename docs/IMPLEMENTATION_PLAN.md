@@ -2,7 +2,9 @@
 
 ## 概述
 
-本计划覆盖从代码生成到最终推送的完整流程，采用「生成 → 验证 → 测试 → 审查 → 推送」的严格阶段门模型。每个阶段都有明确的进入条件、退出条件和可回退点，确保在任一环节发现问题时都能及时止损，不携带缺陷进入下一阶段。
+本计划覆盖从代码生成到最终推送的完整流程，采用「生成 → 验证 → 测试 → 审查 → 推送」的严格阶段门模型。每个阶段都有明确的进入条件、退出条件和可回退点。
+
+本次功能已从「独立文本待办」调整为「基于卡片的自动学习队列」，所有实现围绕现有 `cards` 和 `review_tasks/review_log` 表展开。
 
 ---
 
@@ -10,35 +12,34 @@
 
 ### 目标
 
-按照 PRD 的 6 个实施切片，逐片完成代码实现。每一片都是一个可独立运行、可独立验证的最小可用单元。
+按照 PRD 的 4 个实施切片，逐片完成代码实现。每一片都是一个可独立运行、可独立验证的最小可用单元。
 
 ### 进入条件
 
 - PRD（docs/PRD.md）已通过用户确认
-- 当前工作区干净，无未提交的实验性改动
+- 当前工作区干净（仅包含本次功能相关改动）
 - 已基于 `main` 切出功能分支，例如 `feature/todo-list`
 
 ### 实施顺序
 
 | 切片 | 内容 | 涉及的主要文件/目录 |
 |---|---|---|
-| S1 | 三列看板空状态 + 导航入口 | `src/app/todos/page.tsx`、`src/components/layout/Sidebar.tsx`、`src/components/layout/BottomTab.tsx`、`src/app/page.tsx` |
-| S2 | 新增待办（数据库 + API + 表单） | `supabase/schema.sql`、`src/lib/types.ts`、`src/lib/repositories/todoRepository.ts`、`src/app/api/todos/route.ts`、`src/app/api/todos/[id]/route.ts` |
-| S3 | 编辑与完成/取消完成 | `src/app/api/todos/[id]/route.ts`、看板组件 |
-| S4 | 截止日期排序与逾期高亮 | 看板组件、Repository 查询 |
-| S5 | 软删除与归档恢复 | `todo_items` 表增加软删标记、归档 UI |
-| S6 | 完成复习阶段待办时生成复习任务 | `src/lib/services/reviewService.ts`、联动弹窗组件 |
+| S1 | 三列看板显示卡片清单 + 每日预习题量设置 | `src/app/todos/page.tsx`、`src/components/todos/TodoBoard.tsx`、`src/components/todos/TodoColumn.tsx`、`src/app/settings/todos/page.tsx` |
+| S2 | 卡片学习会话（翻页 + 评级） | `src/app/todos/study/page.tsx`、`src/components/todos/StudySession.tsx` |
+| S3 | 评级后调用复习算法 | `src/app/api/study/complete/route.ts`、调用 `reviewService` |
+| S4 | 会话结束与状态刷新 | 完成页 UI、返回刷新逻辑 |
 
 ### 开发纪律
 
 1. **按切片提交**：每个切片完成后必须单独提交，commit message 格式 `feat(todos): <切片简述>`
-2. **不跨片混合**：同一提交内只包含一个切片的实现，避免审查困难
+2. **不跨片混合**：同一提交内只包含一个切片的实现
 3. **即时自检**：每片写完后立即运行 `npm run typecheck`，不通过不进入下一阶段
-4. **默认向后兼容**：新增表、字段、API 不影响现有卡片/复习/笔记功能
+4. **复用优先**：优先复用 `AnkiReviewCard`、现有 `Card` 类型、`reviewService`，不引入新依赖
+5. **默认向后兼容**：不破坏现有卡片/复习/笔记功能
 
 ### 退出条件
 
-- 6 个切片全部实现完毕
+- 4 个切片全部实现完毕
 - 每个切片对应的代码均已提交到功能分支
 - 最后一次 `npm run typecheck` 0 错误
 
@@ -48,35 +49,36 @@
 
 ### 目标
 
-在本地运行环境中，对已实现功能进行系统性手工验证，确保每个 PRD 验收项都能被复现。
+在本地运行环境中，对已实现功能进行系统性手工验证。
 
 ### 进入条件
 
 - 阶段一所有切片已提交
 - 本地数据库/Supabase 连接正常（或离线模式已明确处理）
+- 题库中已有测试卡片（可通过导入或手动创建）
 
 ### 验证清单
 
 | 编号 | 验证项 | 操作步骤 | 预期结果 |
 |---|---|---|---|
-| V1 | 入口可见 | 打开首页，查看侧边栏、底部 tab、功能模块区 | 均有「待办」入口 |
-| V2 | 空状态 | 首次进入 `/todos` | 三列显示「暂无待办」 |
-| V3 | 新增待办 | 填写标题、描述、截止日期、阶段后提交 | 待办出现在对应列 |
-| V4 | 数据持久化 | 刷新 `/todos` | 刚新增的待办仍然存在 |
-| V5 | 编辑 | 修改标题或阶段 | UI 和数据库同步更新 |
-| V6 | 完成/取消 | 勾选完成，再点击取消 | 状态正确切换，已完成沉底 |
-| V7 | 排序 | 同一阶段添加多个不同截止日期的待办 | 按截止日期升序，逾期标红 |
-| V8 | 软删除 | 删除一个待办 | 看板消失，归档中可见 |
-| V9 | 恢复 | 在归档中恢复 | 待办回到原阶段 |
-| V10 | 彻底删除 | 在归档中彻底删除 | 数据库中不再存在 |
-| V11 | 复习联动 | 完成「复习」阶段待办，选择关联卡片 | `/review` 计划中出现对应复习任务 |
-| V12 | 离线兼容 | 不配置 Supabase 时访问 `/todos` | 页面不报错，显示空状态 |
+| V1 | 入口可见 | 打开首页 | 侧边栏/底部 tab/首页模块区均有「待办」入口 |
+| V2 | 三列看板 | 进入 `/todos` | 显示预习/学习/复习三列 |
+| V3 | 卡片分类 | 准备不同状态的卡片 | 新卡进预习，学过未到期进学习，到期进复习 |
+| V4 | 空列提示 | 让某一阶段没有卡片 | 显示「本阶段暂无卡片」 |
+| V4.5 | 预习题量设置 | 进入设置页修改每日预习题量 | 刷新后设置保留，看板显示对应数量 |
+| V5 | 开始学习 | 点击预习列「开始预习」 | 进入学习会话，显示第一张卡片 |
+| V6 | 翻面 | 点击卡片 | 显示答案 |
+| V7 | 评级 | 点击重来/困难/良好/简单 | 进入下一张卡片 |
+| V8 | 完成会话 | 完成当前列所有卡片 | 显示完成页 |
+| V9 | 算法联动 | 评级后查看数据库 | mastery、review_count、next_review_date 更新，review_log 新增 |
+| V10 | 看板刷新 | 返回 `/todos` | 已复习卡片离开原列 |
+| V11 | 旧功能无影响 | 访问 `/review`、`/cards` | 行为正常 |
 
 ### 退出条件
 
-- 验证清单 V1–V12 全部通过
+- 验证清单 V1–V11 全部通过
 - 发现的缺陷已在阶段一修复并重新提交
-- 形成验证记录（可在本文件末尾追加验证结果，或另附截图/日志）
+- 形成验证记录（截图/日志）
 
 ---
 
@@ -89,36 +91,35 @@
 ### 进入条件
 
 - 阶段二验证清单全部通过
-- 代码结构已稳定，接口定义不再频繁变更
+- 代码结构已稳定
 
 ### 测试范围
 
 | 类型 | 目标 | 位置/文件 |
 |---|---|---|
-| Repository 单元测试 | todoRepository 的 CRUD、软删、归档查询 | `src/lib/repositories/__tests__/todoRepository.test.ts` |
-| API 路由测试 | `GET/POST /api/todos`、`PATCH/DELETE /api/todos/[id]` | `src/app/api/todos/__tests__/route.test.ts` |
-| 组件交互测试（可选） | 表单提交、完成勾选、归档恢复 | `src/components/todos/__tests__/TodoBoard.test.tsx` |
+| 阶段分类逻辑单元测试 | 验证卡片按规则进入正确阶段 | `src/lib/todos/__tests__/phaseClassifier.test.ts` |
+| API 路由测试 | `POST /api/study/complete` | `src/app/api/study/complete/__tests__/route.test.ts` |
+| 组件测试（可选） | 学习会话翻页与评级 | `src/components/todos/__tests__/StudySession.test.tsx` |
 
 ### 测试纪律
 
 1. 每个测试文件先写好一个用例并运行通过，再写下一个
-2. 不通过时不新增测试，防止问题累积
-3. 测试不依赖真实外部服务，使用内存/mock 环境
+2. 不通过时不新增测试
+3. 测试不依赖真实外部服务
 
 ### 运行命令
 
 ```bash
 npm run typecheck
-# 如项目已配置 vitest 通用命令，可运行：
-# npx vitest run src/lib/repositories/__tests__/todoRepository.test.ts
-# npx vitest run src/app/api/todos/__tests__/route.test.ts
+# npx vitest run src/lib/todos/__tests__/phaseClassifier.test.ts
+# npx vitest run src/app/api/study/complete/__tests__/route.test.ts
 ```
 
 ### 退出条件
 
 - 新增测试全部通过
 - `npm run typecheck` 通过
-- 整体测试覆盖率不低于 PRD 核心功能路径的 80%（每个 API 至少一个正向+一个异常用例）
+- 核心 API 至少一个正向 + 一个异常用例
 
 ---
 
@@ -126,7 +127,7 @@ npm run typecheck
 
 ### 目标
 
-通过代码审查和系统检查，发现自动化测试难以覆盖的问题（如安全、性能、可维护性、一致性）。
+通过代码审查发现自动化测试难以覆盖的问题。
 
 ### 进入条件
 
@@ -137,21 +138,21 @@ npm run typecheck
 
 | 编号 | 审查项 | 检查要点 |
 |---|---|---|
-| R1 | 类型安全 | `src/lib/types.ts` 中新增类型被正确使用，无 `any` 滥用 |
-| R2 | API 一致性 | REST 路由风格与 `/api/cards`、`/api/review` 保持一致 |
-| R3 | 数据库安全 | 表字段有合理约束，`todo_items` 加入 `update_updated_at_column` 触发器 |
-| R4 | SQL 可重复执行 | `supabase/schema.sql` 使用 `IF NOT EXISTS`，不破坏现有环境 |
-| R5 | 错误处理 | API 返回统一 `{ data }` / `{ error }`，异常不泄漏堆栈 |
-| R6 | UI 一致性 | 页面使用项目现有 Tailwind 风格，图标/按钮与现有模块一致 |
-| R7 | 无死代码 | 删除 console.log、调试代码、未使用的导入 |
-| R8 | 不影响旧功能 | 访问 `/cards`、`/review`、`/notes` 等行为正常 |
-| R9 | 性能 | 列表查询无 N+1，软删过滤在数据库层完成 |
-| R10 | 隐私/安全 | 不记录敏感信息，归档数据不被未授权访问 |
+| R1 | 类型安全 | 无 `any` 滥用，复用现有 `Card` 类型 |
+| R2 | API 一致性 | 新路由风格与现有 `/api/*` 一致 |
+| R3 | 算法正确性 | 评级后调用 `reviewService`，不重复实现复习逻辑 |
+| R4 | SQL 可重复执行 | 如需 schema 变更，使用 `IF NOT EXISTS` |
+| R5 | 错误处理 | API 返回统一 `{ data }` / `{ error }` |
+| R6 | UI 一致性 | 页面使用现有 Tailwind 风格 |
+| R7 | 无死代码 | 删除临时 log、未使用的导入 |
+| R8 | 不影响旧功能 | `/review`、`/cards`、`/notes` 正常 |
+| R9 | 性能 | 列表查询无 N+1，过滤在数据库/服务层完成 |
+| R10 | 边界处理 | 空列、无卡片、会话中断等场景有友好提示 |
 
 ### 审查方式
 
-1. **AI 自审**：使用代码审查 agent 对功能分支 diff 进行初审
-2. **用户终审**：由用户确认 PRD 第 5 节验收标准全部满足
+1. **AI 自审**：代码审查 agent 对功能分支 diff 初审
+2. **用户终审**：用户确认 PRD 第 5 节验收标准全部满足
 3. **本地回归**：运行 `npm run typecheck` 和全部测试
 
 ### 退出条件
@@ -176,7 +177,7 @@ npm run typecheck
 ### 合并前检查
 
 1. 功能分支基于最新 `main` 分支 rebase 或 merge
-2. 解决所有冲突后再次运行：
+2. 解决冲突后再次运行：
    ```bash
    npm run typecheck
    ```
@@ -184,14 +185,14 @@ npm run typecheck
 
 ### 合并策略
 
-- 使用 `--no-ff` 合并，保留功能分支记录
-- 合并提交信息示例：`feat(todos): 添加预习/学习/复习三阶段待办清单 (#<PR号>)`
+- 使用 `--no-ff` 合并
+- 合并提交信息：`feat(todos): 添加预习/学习/复习卡片学习队列 (#<PR号>)`
 
 ### 合并后动作
 
-1. 在本地或 staging 环境验证 `/todos` 入口和基本 CRUD
-2. 如项目使用 CI/CD，等待 GitHub Actions 通过
-3. 删除远端功能分支（保留本地分支可选）
+1. 在本地或 staging 验证 `/todos` 入口、看板、学习会话
+2. 等待 CI/CD 通过
+3. 删除远端功能分支
 
 ### 退出条件
 
@@ -205,10 +206,10 @@ npm run typecheck
 
 | 风险点 | 应对措施 |
 |---|---|
-| 数据库表结构在开发中变更 | 每个 schema 变更单独提交，保留可重复执行的 SQL |
-| 软删除实现与现有查询冲突 | 所有 list 查询默认过滤 `archived = false`，通过测试覆盖 |
-| 复习联动影响现有 review 模块 | 联动逻辑封装在 service 层，不改动 review 核心调度 |
-| 测试依赖 Supabase 离线 | 测试使用 mock db 或内存实现，不依赖真实网络 |
+| 阶段分类规则调整 | 分类逻辑集中到一个函数，修改时只改一处 |
+| 复习算法调用失败 | 会话中评级失败给出明确提示，不卡死 |
+| 大量卡片导致看板卡顿 | 列内列表限制显示数量，必要时加分页 |
+| 测试依赖 Supabase | 测试使用 mock 数据，不依赖真实网络 |
 
 ---
 
@@ -218,7 +219,7 @@ npm run typecheck
 |---|---|
 | 生成 | 4–6 小时 |
 | 验证 | 1–2 小时 |
-| 测试 | 2–3 小时 |
+| 测试 | 1.5–2.5 小时 |
 | 审查 | 1–2 小时 |
 | 推送 | 0.5–1 小时 |
 
