@@ -99,12 +99,13 @@ export default function DashboardPage() {
 
       {/* Module Overview */}
       <h2 className="text-lg font-semibold text-gray-800 mt-8 mb-4">功能模块</h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <ModuleCard href="/cards" label="题库管理" icon="📇" desc="CRUD & 表格" />
         <ModuleCard href="/notes" label="Markdown 笔记" icon="📝" desc="编辑 & 双链" />
         <ModuleCard href="/knowledge" label="RAG 知识库" icon="📚" desc="文档 & 检索" />
         <ModuleCard href="/mindmap" label="思维导图" icon="🧠" desc="Mermaid" />
         <ModuleCard href="/graph" label="关系图谱" icon="🔗" desc="React Flow" />
+        <ModuleCard href="/todos" label="待办清单" icon="✅" desc="预习/学习/复习" />
       </div>
     </div>
   )

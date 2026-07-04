@@ -7,6 +7,8 @@ const TAB_ITEMS = [
   { href: '/', label: '首页', icon: '📊' },
   { href: '/cards', label: '题库', icon: '📇' },
   { href: '/review', label: '复习', icon: '📅' },
+  { href: '/todos', label: '待办', icon: '✅' },
+  { href: '/notebooks', label: '笔记本', icon: '📓' },
   { href: '/search', label: '搜索', icon: '🔍' },
   { href: '/settings', label: '设置', icon: '⚙️' },
 ]
